@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Class Time</title>
+<style>
+  :root{
+    --bg:#f4f1ea; --card:#fffdf8; --ink:#20252b; --muted:#737981;
+    --line:#e5e0d6; --accent:#b9822f; --accent2:#e8d5b5;
+    --green:#4f8067; --blue:#587a9e; --red:#a75b52;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  .wrap{max-width:1100px;margin:auto;padding:28px 20px 50px}
+  header{display:flex;justify-content:space-between;gap:20px;align-items:flex-end;margin-bottom:24px}
+  h1{font-family:Georgia,serif;font-size:34px;margin:0 0 5px}
+  .sub{color:var(--muted);font-size:14px}
+  select{border:1px solid var(--line);background:white;border-radius:12px;padding:11px 14px;font-size:15px;color:var(--ink);outline:none}
+  .hero{background:var(--card);border:1px solid var(--line);border-radius:24px;padding:28px;box-shadow:0 8px 30px #51472d0d;margin-bottom:24px}
+  .hero-top{display:flex;justify-content:space-between;gap:20px;align-items:flex-start}
+  .label{text-transform:uppercase;letter-spacing:.12em;font-size:11px;font-weight:700;color:var(--muted)}
+  .period{font-size:28px;font-weight:750;margin-top:6px}
+  .count{font-size:56px;line-height:1;font-weight:800;letter-spacing:-.04em;margin:10px 0}
+  .ends{font-size:16px;color:var(--muted)}
+  .ends strong{color:var(--ink)}
+  .progress{height:9px;background:#ece7dc;border-radius:99px;overflow:hidden;margin-top:24px}
+  .bar{height:100%;width:0%;background:var(--accent);transition:width .5s}
+  .status{margin-top:12px;color:var(--muted);font-size:13px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:20px}
+  .card h2{font-size:17px;margin:0 0 15px}
+  .day-title{display:flex;justify-content:space-between;align-items:center}
+  .badge{font-size:11px;background:var(--accent2);padding:5px 8px;border-radius:99px}
+  .schedule{display:flex;flex-direction:column;gap:7px}
+  .row{display:grid;grid-template-columns:72px 1fr 105px;gap:10px;align-items:center;padding:12px;border-radius:13px;border:1px solid transparent}
+  .row.current{background:#f7eddc;border-color:#e7d1aa}
+  .row.break{background:#f5f3ee}
+  .pnum{font-weight:750;font-size:13px}
+  .time{font-size:14px}
+  .duration{font-size:12px;color:var(--muted);text-align:right}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:15px;font-size:12px;color:var(--muted)}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);margin-right:5px}
+  .dot.breakdot{background:#aaa}
+  .notice{margin-top:18px;font-size:12px;color:var(--muted);line-height:1.5}
+  @media(max-width:750px){
+    header,.hero-top{align-items:flex-start;flex-direction:column}
+    .grid{grid-template-columns:1fr}
+    .count{font-size:46px}
+    .row{grid-template-columns:60px 1fr 82px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Orlando Science Bell Schedule</h1>
+      <div class="sub">2025–2026 • High School • Block Days</div>
+    </div>
+    <label>
+      <span class="sub" style="display:block;margin-bottom:5px">Grade</span>
+      <select id="grade">
+        <option value="9">9th Grade</option>
+        <option value="10" selected>10th Grade</option>
+        <option value="11">11th Grade</option>
+        <option value="12">12th Grade</option>
+      </select>
+    </label>
+  </header>
+
+  <section class="hero">
+    <div class="hero-top">
+      <div>
+        <div class="label" id="dayLabel">Loading…</div>
+        <div class="period" id="currentPeriod">Checking schedule…</div>
+      <div class="sub" id="selectedGradeLabel" style="margin-top:6px"></div>
+      </div>
+      <div style="text-align:right">
+        <div class="label">Current time</div>
+        <div id="clock" style="font-size:18px;font-weight:700;margin-top:6px">--:--</div>
+      </div>
+    </div>
+    <div class="count" id="countdown">--</div>
+    <div class="ends" id="ends">Class ends at <strong>--</strong></div>
+    <div class="progress"><div class="bar" id="bar"></div></div>
+    <div class="status" id="status"></div>
+  </section>
+
+  <div class="grid">
+    <section class="card">
+      <div class="day-title">
+        <h2>Monday / Tuesday / Thursday / Friday</h2>
+        <span class="badge">9th–12th</span>
+      </div>
+      <div class="schedule" id="regular"></div>
+      <div class="legend"><span><i class="dot"></i>Class / activity</span><span><i class="dot breakdot"></i>Break / lunch</span></div>
+    </section>
+
+    <section class="card">
+      <div class="day-title">
+        <h2>Wednesday</h2>
+        <span class="badge">Grade-specific</span>
+      </div>
+      <div class="schedule" id="wednesday"></div>
+      <div class="notice">Wednesday schedules differ by grade. The 10th–11th grade schedule is shown when either of those grades is selected. The supplied schedule does not distinguish 9th vs. 12th Wednesday times, so the listed 9th–12th Wednesday schedule is used for those grades.</div>
+    </section>
+  </div>
+</div>
+
+<script>
+const regular = [
+  {name:"Period 1", start:"07:50", end:"09:22", dur:"92 min"},
+  {name:"Break", start:"09:22", end:"09:27", dur:"5 min", break:true},
+  {name:"Period 2", start:"09:27", end:"10:55", dur:"88 min"},
+  {name:"Break", start:"10:55", end:"11:00", dur:"5 min", break:true},
+  {name:"Period 3", start:"11:00", end:"12:28", dur:"88 min"},
+  {name:"Break", start:"12:28", end:"12:33", dur:"5 min", break:true},
+  {name:"Lunch", start:"12:33", end:"13:13", dur:"40 min", break:true},
+  {name:"Period 4", start:"13:13", end:"14:50", dur:"97 min"},
+  {name:"Break", start:"14:50", end:"14:55", dur:"5 min", break:true},
+  {name:"Clubs", start:"14:55", end:"15:30", dur:"35 min"}
+];
+
+const wedGeneral = [
+  {name:"Period 1", start:"07:50", end:"09:22", dur:"92 min"},
+  {name:"Break", start:"09:22", end:"09:27", dur:"5 min", break:true},
+  {name:"Period 2", start:"09:27", end:"10:55", dur:"88 min"},
+  {name:"Break", start:"10:55", end:"11:00", dur:"5 min", break:true},
+  {name:"Lunch", start:"11:00", end:"11:40", dur:"40 min", break:true},
+  {name:"Break", start:"11:40", end:"11:45", dur:"5 min", break:true},
+  {name:"Period 3", start:"11:45", end:"13:13", dur:"88 min"},
+  {name:"Break", start:"13:13", end:"13:18", dur:"5 min", break:true},
+  {name:"Period 4", start:"13:18", end:"14:50", dur:"92 min"},
+  {name:"Break", start:"14:50", end:"14:55", dur:"5 min", break:true},
+  {name:"Clubs", start:"14:55", end:"15:30", dur:"35 min"}
+];
+
+const wed10_11 = [
+  {name:"Period 1", start:"07:50", end:"09:05", dur:"75 min"},
+  {name:"Break", start:"09:05", end:"09:10", dur:"5 min", break:true},
+  {name:"Period 2", start:"09:10", end:"10:22", dur:"72 min"},
+  {name:"Break", start:"10:22", end:"10:27", dur:"5 min", break:true},
+  {name:"Lunch", start:"10:27", end:"11:07", dur:"40 min", break:true},
+  {name:"Break", start:"11:07", end:"11:12", dur:"5 min", break:true},
+  {name:"Period 3", start:"11:12", end:"12:25", dur:"73 min"},
+  {name:"Break", start:"12:25", end:"12:30", dur:"5 min", break:true},
+  {name:"Period 4", start:"12:30", end:"13:45", dur:"75 min"},
+  {name:"Break", start:"13:45", end:"13:50", dur:"5 min", break:true},
+  {name:"Clubs", start:"13:50", end:"14:25", dur:"35 min"}
+];
+
+const $ = id => document.getElementById(id);
+const grade = $("grade");
+
+// Keep the selected grade in one place so every part of the UI uses it.
+let selectedGrade = grade.value;
+
+grade.addEventListener("change", (event) => {
+  selectedGrade = event.target.value;
+  update(true);
+});
+
+function mins(t){ const [h,m]=t.split(":").map(Number); return h*60+m; }
+function fmt(t){
+  let [h,m]=t.split(":").map(Number);
+  const ap=h>=12?"PM":"AM"; h=h%12||12;
+  return `${h}:${String(m).padStart(2,"0")} ${ap}`;
+}
+function renderSchedule(el, data){
+  el.innerHTML=data.map((x,i)=>`<div class="row ${x.break?"break":""}" data-i="${i}">
+    <div class="pnum">${x.name}</div><div class="time">${fmt(x.start)} – ${fmt(x.end)}</div><div class="duration">${x.dur}</div>
+  </div>`).join("");
+}
+function getData(now = new Date()){
+  const isWed = now.getDay() === 3;
+  return isWed && (selectedGrade === "10" || selectedGrade === "11")
+    ? wed10_11
+    : (isWed ? wedGeneral : regular);
+}
+function plural(n, unit){ return `${n}${unit}${n===1?"":"s"}`; }
+function update(forceRender = false){
+  const now = new Date(), day = now.getDay();
+  const current = now.getHours()*60 + now.getMinutes() + now.getSeconds()/60;
+  const isWed = day === 3, data = getData(now);
+  $("dayLabel").textContent=now.toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric"});
+  $("clock").textContent=now.toLocaleTimeString([], {hour:"numeric",minute:"2-digit",second:"2-digit"});
+$("selectedGradeLabel").textContent=`${selectedGrade}th grade schedule`;
+  // Re-render immediately after a grade change, and whenever the day changes.
+  // The regular schedule is grade-independent in the supplied schedule.
+  renderSchedule($("regular"), regular);
+  renderSchedule(
+    $("wednesday"),
+    isWed && (selectedGrade === "10" || selectedGrade === "11")
+      ? wed10_11
+      : wedGeneral
+  );
+
+  let idx=data.findIndex(x=>current>=mins(x.start)&&current<mins(x.end));
+  if(day===0||day===6||idx<0){
+    $("currentPeriod").textContent = day===0||day===6 ? "Weekend" : (current<mins(data[0].start) ? "Before school" : "School day complete");
+    $("countdown").textContent="—";
+    $("ends").innerHTML=day===0||day===6 ? "No classes today" : "The school day has ended";
+    $("bar").style.width="0%"; $("status").textContent="";
+    document.title="Orlando Science • Bell Schedule";
+    return;
+  }
+  const x=data[idx], remaining=Math.max(0,Math.ceil((mins(x.end)-current)*60));
+  const h=Math.floor(remaining/3600), m=Math.floor((remaining%3600)/60), s=remaining%60;
+  const display = h ? `${h}h ${m}m` : `${m}m`;
+  $("currentPeriod").textContent=x.name;
+  $("countdown").textContent=display;
+  $("ends").innerHTML=`${x.break ? "Ends" : "Class ends"} at <strong>${fmt(x.end)}</strong>`;
+  const pct=((current-mins(x.start))/(mins(x.end)-mins(x.start)))*100;
+  $("bar").style.width=Math.min(100,Math.max(0,pct))+"%";
+  $("status").textContent=x.break ? "You're on a break." : "Time remaining in this period.";
+  document.title=`${display} ${fmt(x.end)}`;
+}
+update(true);
+setInterval(() => update(false), 1000);
+</script>
+</body>
+</html>

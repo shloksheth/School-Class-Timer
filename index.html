@@ -34,8 +34,8 @@
   .badge{font-size:11px;background:var(--accent2);padding:5px 8px;border-radius:99px}
   .schedule{display:flex;flex-direction:column;gap:7px}
   .row{display:grid;grid-template-columns:72px 1fr 105px;gap:10px;align-items:center;padding:12px;border-radius:13px;border:1px solid transparent}
-  .row.current{background:#f7eddc;border-color:#e7d1aa}
   .row.break{background:#f5f3ee}
+  .row.current{background:#f7eddc;border-color:#e7d1aa}
   .pnum{font-weight:750;font-size:13px}
   .time{font-size:14px}
   .duration{font-size:12px;color:var(--muted);text-align:right}
@@ -91,7 +91,7 @@
     <section class="card">
       <div class="day-title">
         <h2>Monday / Tuesday / Thursday / Friday</h2>
-        <span class="badge">9th–12th</span>
+        <span class="badge" id="regularBadge">10th–11th</span>
       </div>
       <div class="schedule" id="regular"></div>
       <div class="legend"><span><i class="dot"></i>Class / activity</span><span><i class="dot breakdot"></i>Break / lunch</span></div>
@@ -100,16 +100,16 @@
     <section class="card">
       <div class="day-title">
         <h2>Wednesday</h2>
-        <span class="badge">Grade-specific</span>
+        <span class="badge" id="wednesdayBadge">10th–11th</span>
       </div>
       <div class="schedule" id="wednesday"></div>
-      <div class="notice">Wednesday schedules differ by grade. The 10th–11th grade schedule is shown when either of those grades is selected. The supplied schedule does not distinguish 9th vs. 12th Wednesday times, so the listed 9th–12th Wednesday schedule is used for those grades.</div>
+      <div class="notice">Select your grade to see its block-day and Wednesday schedules. Times are from the 2025–2026 Orlando Science High School bell schedule.</div>
     </section>
   </div>
 </div>
 
 <script>
-const regular = [
+const regular9_12 = [
   {name:"Period 1", start:"07:50", end:"09:22", dur:"92 min"},
   {name:"Break", start:"09:22", end:"09:27", dur:"5 min", break:true},
   {name:"Period 2", start:"09:27", end:"10:55", dur:"88 min"},
@@ -117,12 +117,13 @@ const regular = [
   {name:"Period 3", start:"11:00", end:"12:28", dur:"88 min"},
   {name:"Break", start:"12:28", end:"12:33", dur:"5 min", break:true},
   {name:"Lunch", start:"12:33", end:"13:13", dur:"40 min", break:true},
-  {name:"Period 4", start:"13:13", end:"14:50", dur:"97 min"},
+  {name:"Break", start:"13:13", end:"13:18", dur:"5 min", break:true},
+  {name:"Period 4", start:"13:18", end:"14:50", dur:"92 min"},
   {name:"Break", start:"14:50", end:"14:55", dur:"5 min", break:true},
   {name:"Clubs", start:"14:55", end:"15:30", dur:"35 min"}
 ];
 
-const wedGeneral = [
+const regular10_11 = [
   {name:"Period 1", start:"07:50", end:"09:22", dur:"92 min"},
   {name:"Break", start:"09:22", end:"09:27", dur:"5 min", break:true},
   {name:"Period 2", start:"09:27", end:"10:55", dur:"88 min"},
@@ -134,6 +135,20 @@ const wedGeneral = [
   {name:"Period 4", start:"13:18", end:"14:50", dur:"92 min"},
   {name:"Break", start:"14:50", end:"14:55", dur:"5 min", break:true},
   {name:"Clubs", start:"14:55", end:"15:30", dur:"35 min"}
+];
+
+const wed9_12 = [
+  {name:"Period 1", start:"07:50", end:"09:05", dur:"75 min"},
+  {name:"Break", start:"09:05", end:"09:10", dur:"5 min", break:true},
+  {name:"Period 2", start:"09:10", end:"10:22", dur:"72 min"},
+  {name:"Break", start:"10:22", end:"10:27", dur:"5 min", break:true},
+  {name:"Period 3", start:"10:27", end:"11:40", dur:"73 min"},
+  {name:"Break", start:"11:40", end:"11:45", dur:"5 min", break:true},
+  {name:"Lunch", start:"11:45", end:"12:25", dur:"40 min", break:true},
+  {name:"Break", start:"12:25", end:"12:30", dur:"5 min", break:true},
+  {name:"Period 4", start:"12:30", end:"13:45", dur:"75 min"},
+  {name:"Break", start:"13:45", end:"13:50", dur:"5 min", break:true},
+  {name:"Clubs", start:"13:50", end:"14:25", dur:"35 min"}
 ];
 
 const wed10_11 = [
@@ -173,39 +188,41 @@ function renderSchedule(el, data){
   </div>`).join("");
 }
 function getData(now = new Date()){
-  const isWed = now.getDay() === 3;
-  return isWed && (selectedGrade === "10" || selectedGrade === "11")
-    ? wed10_11
-    : (isWed ? wedGeneral : regular);
+  const upperLunch = selectedGrade === "10" || selectedGrade === "11";
+  return now.getDay() === 3
+    ? (upperLunch ? wed10_11 : wed9_12)
+    : (upperLunch ? regular10_11 : regular9_12);
 }
-function plural(n, unit){ return `${n}${unit}${n===1?"":"s"}`; }
 function update(forceRender = false){
   const now = new Date(), day = now.getDay();
   const current = now.getHours()*60 + now.getMinutes() + now.getSeconds()/60;
-  const isWed = day === 3, data = getData(now);
+  const data = getData(now);
   $("dayLabel").textContent=now.toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric"});
   $("clock").textContent=now.toLocaleTimeString([], {hour:"numeric",minute:"2-digit",second:"2-digit"});
 $("selectedGradeLabel").textContent=`${selectedGrade}th grade schedule`;
-  // Re-render immediately after a grade change, and whenever the day changes.
-  // The regular schedule is grade-independent in the supplied schedule.
-  renderSchedule($("regular"), regular);
-  renderSchedule(
-    $("wednesday"),
-    isWed && (selectedGrade === "10" || selectedGrade === "11")
-      ? wed10_11
-      : wedGeneral
-  );
+  // The two grade groups have separate schedules on both block days and Wednesdays.
+  const upperLunch = selectedGrade === "10" || selectedGrade === "11";
+  const groupLabel = upperLunch ? "10th–11th" : "9th & 12th";
+  if (forceRender || groupLabel !== $("regularBadge").textContent) {
+    $("regularBadge").textContent = groupLabel;
+    $("wednesdayBadge").textContent = groupLabel;
+    renderSchedule($("regular"), upperLunch ? regular10_11 : regular9_12);
+    renderSchedule($("wednesday"), upperLunch ? wed10_11 : wed9_12);
+  }
+  document.querySelectorAll(".row.current").forEach(row => row.classList.remove("current"));
 
   let idx=data.findIndex(x=>current>=mins(x.start)&&current<mins(x.end));
   if(day===0||day===6||idx<0){
     $("currentPeriod").textContent = day===0||day===6 ? "Weekend" : (current<mins(data[0].start) ? "Before school" : "School day complete");
     $("countdown").textContent="—";
-    $("ends").innerHTML=day===0||day===6 ? "No classes today" : "The school day has ended";
+    $("ends").innerHTML=day===0||day===6 ? "No classes today" : (current<mins(data[0].start) ? `School starts at <strong>${fmt(data[0].start)}</strong>` : "The school day has ended");
     $("bar").style.width="0%"; $("status").textContent="";
     document.title="Orlando Science • Bell Schedule";
     return;
   }
   const x=data[idx], remaining=Math.max(0,Math.ceil((mins(x.end)-current)*60));
+  const activeSchedule = $(day === 3 ? "wednesday" : "regular");
+  activeSchedule.children[idx]?.classList.add("current");
   const h=Math.floor(remaining/3600), m=Math.floor((remaining%3600)/60), s=remaining%60;
   const display = h ? `${h}h ${m}m` : `${m}m`;
   $("currentPeriod").textContent=x.name;

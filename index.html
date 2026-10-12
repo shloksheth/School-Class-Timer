@@ -440,7 +440,7 @@ html[data-theme="dark"] .unsaved-dialog,html[data-theme="light"][data-scene="for
             <label class="class-row"><span>Period 7</span><input class="text-input" id="class7" maxlength="60" placeholder="Class name"></label>
             <label class="class-row"><span>Period 8</span><input class="text-input" id="class8" maxlength="60" placeholder="Class name"></label>
           </div>
-          <p class="rotation-note">A/B rotation alternates every calendar day, including weekends and school breaks. October 1, 2026 is the A Day anchor.</p>
+          <p class="rotation-note">Quarter 2 follows the OSS A/B schedule for October 13–December 18, 2026. October 13 is a B Day. Weekends and Thanksgiving break (November 23–27) have no classes and do not advance the rotation.</p>
         </section>
         <section class="form-section">
           <h3>Club schedule</h3>
@@ -494,6 +494,18 @@ const BELL_EARLY_KEY='oss-bell-early';
 const BELL_EARLY_OPTIONS=[15,30,60,90,120,180,300];
 const ROTATION_ANCHOR_UTC=Date.UTC(2026,9,1); // Oct 1, 2026 is an A Day.
 const DAY_MS=86400000;
+// Meghan Singleton's “A | B Day Schedule Quarter 2” post in OSS Grade 10,
+// October 9, 2026: start with B, alternate school days, and pause for Thanksgiving.
+const Q2_START_UTC=Date.UTC(2026,9,13);
+const Q2_END_UTC=Date.UTC(2026,11,18);
+const THANKSGIVING_START_UTC=Date.UTC(2026,10,23);
+const THANKSGIVING_END_UTC=Date.UTC(2026,10,27);
+
+function isSchoolUtc(utc){
+  const day=new Date(utc).getUTCDay();
+  return day!==0&&day!==6&&!(utc>=THANKSGIVING_START_UTC&&utc<=THANKSGIVING_END_UTC);
+}
+function isSchoolDay(date){return isSchoolUtc(calendarUtc(date))}
 let selectedGrade=$('grade').value;
 let selectedView=new Date().getDay()===3?'wednesday':'regular';
 let lenis=null;
@@ -580,14 +592,34 @@ function fmtTitleTime(t){let[h,m]=t.split(':').map(Number);h=h%12||12;return `${
 function periodCode(periodNumber,rotation){if(!periodNumber)return null;const slot=periodNumber>4?periodNumber-4:periodNumber;return `${rotation}${slot}`}
 function dataFor(view){const upper=selectedGrade==='10'||selectedGrade==='11';return view==='wednesday'?(upper?wed10_11:wed9_12):(upper?regular10_11:regular9_12)}
 function calendarUtc(date){return Date.UTC(date.getFullYear(),date.getMonth(),date.getDate())}
-function rotationForDate(date){const diff=Math.round((calendarUtc(date)-ROTATION_ANCHOR_UTC)/DAY_MS);return ((diff%2)+2)%2===0?'A':'B'}
-function periodForSlot(slot,date){return rotationForDate(date)==='A'?slot:slot+4}
+function rotationForDate(date){
+  const utc=calendarUtc(date);
+  if(!isSchoolUtc(utc))return null;
+  if(utc>=Q2_START_UTC&&utc<=Q2_END_UTC){
+    // Count completed school days, so Monday follows Friday's rotation.
+    let schoolDays=0;
+    for(let day=Q2_START_UTC;day<utc;day+=DAY_MS){
+      if(isSchoolUtc(day))schoolDays++;
+    }
+    return schoolDays%2===0?'B':'A';
+  }
+  // Keep the previous calculation outside the published Quarter 2 calendar.
+  const diff=Math.round((utc-ROTATION_ANCHOR_UTC)/DAY_MS);
+  return ((diff%2)+2)%2===0?'A':'B';
+}
+function periodForSlot(slot,date){const rotation=rotationForDate(date);return rotation===null?null:rotation==='A'?slot:slot+4}
 function sameDate(a,b){return a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate()}
-function previewDateForView(view,now=new Date()){const d=new Date(now.getFullYear(),now.getMonth(),now.getDate(),12);if(view==='wednesday'){if(d.getDay()===3)return d;let delta=(3-d.getDay()+7)%7;if(delta===0)delta=7;d.setDate(d.getDate()+delta);return d}if([1,2,4,5].includes(d.getDay()))return d;do{d.setDate(d.getDate()+1)}while(![1,2,4,5].includes(d.getDay()));return d}
-function profileLabel(baseName,date){const profile=activeProfile();const match=baseName.match(/^Period ([1-4])$/);if(match){const slot=Number(match[1]);const actualPeriod=periodForSlot(slot,date);const custom=profile?.classes?.[actualPeriod]?.trim();return{displayName:custom||`Period ${actualPeriod}`,periodNumber:actualPeriod,slot}}if(baseName==='Clubs'){const hasClub=profile&&(profile.clubDays||[]).map(Number).includes(date.getDay());if(hasClub&&profile.clubName?.trim())return{displayName:profile.clubName.trim(),periodNumber:null,slot:null};return{displayName:'Club period',periodNumber:null,slot:null}}return{displayName:baseName,periodNumber:null,slot:null}}
+function previewDateForView(view,now=new Date()){
+  const d=new Date(now.getFullYear(),now.getMonth(),now.getDate(),12);
+  while(!isSchoolDay(d)||(view==='wednesday'?d.getDay()!==3:d.getDay()===3)){
+    d.setDate(d.getDate()+1);
+  }
+  return d;
+}
+function profileLabel(baseName,date){const profile=activeProfile();const match=baseName.match(/^Period ([1-4])$/);if(match){const slot=Number(match[1]);const actualPeriod=periodForSlot(slot,date);if(actualPeriod===null)return{displayName:baseName,periodNumber:null,slot};const custom=profile?.classes?.[actualPeriod]?.trim();return{displayName:custom||`Period ${actualPeriod}`,periodNumber:actualPeriod,slot}}if(baseName==='Clubs'){const hasClub=profile&&(profile.clubDays||[]).map(Number).includes(date.getDay());if(hasClub&&profile.clubName?.trim())return{displayName:profile.clubName.trim(),periodNumber:null,slot:null};return{displayName:'Club period',periodNumber:null,slot:null}}return{displayName:baseName,periodNumber:null,slot:null}}
 function decoratedData(view,date){return dataFor(view).map(x=>{const meta=profileLabel(x.name,date);return{...x,...meta}})}
 
-function renderSchedule(){const now=new Date();const previewDate=previewDateForView(selectedView,now);const data=decoratedData(selectedView,previewDate);const actualView=now.getDay()===3?'wednesday':'regular';const current=now.getHours()*60+now.getMinutes()+now.getSeconds()/60;const upper=selectedGrade==='10'||selectedGrade==='11';const groupLabel=upper?'10th-11th grade':'9th & 12th grade';$('groupBadge').textContent=`${groupLabel} · ${rotationForDate(previewDate)} Day`;$('scheduleList').innerHTML=data.map(x=>{const active=sameDate(previewDate,now)&&selectedView===actualView&&![0,6].includes(now.getDay())&&current>=mins(x.start)&&current<mins(x.end);const periodMeta=x.periodNumber?`<span style="display:block;color:var(--muted);font-size:9px;margin-top:2px">Period ${x.periodNumber}</span>`:'';return `<div class="schedule-row ${x.break?'break':''} ${active?'current':''}"><div class="schedule-name">${escapeHtml(x.displayName)}${periodMeta}</div><div class="schedule-time">${fmt(x.start)} – ${fmt(x.end)}</div><div class="schedule-duration">${x.dur}</div></div>`}).join('');document.querySelectorAll('.tab').forEach(tab=>{const active=tab.dataset.view===selectedView;tab.classList.toggle('active',active);tab.setAttribute('aria-selected',String(active))})}
+function renderSchedule(){const now=new Date();const previewDate=previewDateForView(selectedView,now);const data=decoratedData(selectedView,previewDate);const actualView=now.getDay()===3?'wednesday':'regular';const current=now.getHours()*60+now.getMinutes()+now.getSeconds()/60;const upper=selectedGrade==='10'||selectedGrade==='11';const groupLabel=upper?'10th-11th grade':'9th & 12th grade';$('groupBadge').textContent=`${groupLabel} · ${rotationForDate(previewDate)} Day`;$('scheduleList').innerHTML=data.map(x=>{const active=sameDate(previewDate,now)&&selectedView===actualView&&isSchoolDay(now)&&current>=mins(x.start)&&current<mins(x.end);const periodMeta=x.periodNumber?`<span style="display:block;color:var(--muted);font-size:9px;margin-top:2px">Period ${x.periodNumber}</span>`:'';return `<div class="schedule-row ${x.break?'break':''} ${active?'current':''}"><div class="schedule-name">${escapeHtml(x.displayName)}${periodMeta}</div><div class="schedule-time">${fmt(x.start)} – ${fmt(x.end)}</div><div class="schedule-duration">${x.dur}</div></div>`}).join('');document.querySelectorAll('.tab').forEach(tab=>{const active=tab.dataset.view===selectedView;tab.classList.toggle('active',active);tab.setAttribute('aria-selected',String(active))})}
 function classEmoji(item){
   const name=String(item?.displayName||item?.name||'').toLowerCase();
   if(item?.break||name.includes('changeover'))return '🔄';
@@ -604,8 +636,54 @@ function classEmoji(item){
   if(/pe|physical|fitness|health/.test(name))return '🏃';
   return '🎒';
 }
-function renderUpcoming(data,current,idx,weekend){if(weekend){$('upcomingList').innerHTML='<div class="empty">No classes today.</div>';return}let startIndex=idx>=0?idx+1:data.findIndex(x=>current<mins(x.start));if(startIndex<0){$('upcomingList').innerHTML='<div class="empty">School is finished for today.</div>';return}const items=data.slice(startIndex,startIndex+3);$('upcomingList').innerHTML=items.map((x,i)=>`<div class="upcoming-item"><div class="upcoming-badge">${classEmoji(x)}</div><div><div class="upcoming-name">${escapeHtml(x.displayName)}</div><div class="upcoming-time">${x.periodNumber?`Period ${x.periodNumber} · `:''}${fmt(x.start)} – ${fmt(x.end)}</div></div></div>`).join('')}
-function update(){const now=new Date();const day=now.getDay();const weekend=day===0||day===6;const rotation=rotationForDate(now);const view=day===3?'wednesday':'regular';const data=decoratedData(view,now);const current=now.getHours()*60+now.getMinutes()+now.getSeconds()/60;const idx=data.findIndex(x=>current>=mins(x.start)&&current<mins(x.end));const start=mins(data[0].start);const end=mins(data[data.length-1].end);const dayPct=Math.max(0,Math.min(100,((current-start)/(end-start))*100));const displayPct=weekend?0:dayPct;$('dayLabel').textContent=now.toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'});$('clock').textContent=now.toLocaleTimeString([],{hour:'numeric',minute:'2-digit',second:'2-digit'});$('dayNote').textContent=`${rotation} Day · ${day===3?'Wednesday schedule':'Regular block day'}`;$('upcomingDayType').textContent=`${rotation} Day`;$('selectedGradeLabel').textContent=`Grade ${selectedGrade} · ${rotation} Day · ${day===3?'Wednesday':'Regular block day'}`;$('statRotation').textContent=`${rotation} Day`;$('statDismissal').textContent=fmt(data[data.length-1].end);$('progressCopy').textContent=`${Math.round(displayPct)}%`;$('dayProgress').style.width=`${displayPct}%`;$('dayRange').textContent=`${fmt(data[0].start)} - ${fmt(data[data.length-1].end)}`;if(weekend||idx<0){const before=current<start;setMotionText($('currentPeriod'),weekend?`${rotation} Day · Weekend`:before?'Before school':'School day complete','words');setMotionText($('countdown'),'–','chars');$('statEnds').textContent=before&&!weekend?fmt(data[0].start):'–';$('ends').innerHTML=weekend?`No classes today. The A/B rotation still counts today as <strong>${rotation} Day</strong>.`:before?`School starts at <strong>${fmt(data[0].start)}</strong>`:'The school day has ended';document.title=`${rotation} Day · Orlando Science Bell Schedule`}else{const x=data[idx];const remaining=Math.max(0,Math.ceil((mins(x.end)-current)*60));maybeRingBell(now,view,x,remaining);const h=Math.floor(remaining/3600),m=Math.floor((remaining%3600)/60);const display=h?`${h}h ${m}m`:`${m}m`;setMotionText($('currentPeriod'),x.displayName,'words');setMotionText($('countdown'),display,'chars');$('statEnds').textContent=fmt(x.end);$('ends').innerHTML=`${x.break?'Ends':'Class ends'} at <strong>${fmt(x.end)}</strong>${x.periodNumber?` · Period ${x.periodNumber}`:''}`;const titleMinutes=Math.max(1,Math.ceil(remaining/60));const pCode=periodCode(x.periodNumber,rotation);document.title=pCode?`${titleMinutes}m | ${fmtTitleTime(x.end)} | Period ${pCode}`:`${titleMinutes}m | ${fmtTitleTime(x.end)} | ${x.displayName}`}renderUpcoming(data,current,idx,weekend);renderSchedule()}
+function renderUpcoming(data,current,idx,noSchool){if(noSchool){$('upcomingList').innerHTML='<div class="empty">No classes today.</div>';return}let startIndex=idx>=0?idx+1:data.findIndex(x=>current<mins(x.start));if(startIndex<0){$('upcomingList').innerHTML='<div class="empty">School is finished for today.</div>';return}const items=data.slice(startIndex,startIndex+3);$('upcomingList').innerHTML=items.map((x,i)=>`<div class="upcoming-item"><div class="upcoming-badge">${classEmoji(x)}</div><div><div class="upcoming-name">${escapeHtml(x.displayName)}</div><div class="upcoming-time">${x.periodNumber?`Period ${x.periodNumber} · `:''}${fmt(x.start)} – ${fmt(x.end)}</div></div></div>`).join('')}
+function update(){
+  const now=new Date();
+  const day=now.getDay();
+  const noSchool=!isSchoolDay(now);
+  const rotation=rotationForDate(now);
+  const rotationLabel=noSchool?'No school':rotation+' Day';
+  const view=day===3?'wednesday':'regular';
+  const data=decoratedData(view,now);
+  const current=now.getHours()*60+now.getMinutes()+now.getSeconds()/60;
+  const idx=data.findIndex(x=>current>=mins(x.start)&&current<mins(x.end));
+  const start=mins(data[0].start);
+  const end=mins(data[data.length-1].end);
+  const dayPct=Math.max(0,Math.min(100,((current-start)/(end-start))*100));
+  const displayPct=noSchool?0:dayPct;
+  $('dayLabel').textContent=now.toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'});
+  $('clock').textContent=now.toLocaleTimeString([],{hour:'numeric',minute:'2-digit',second:'2-digit'});
+  $('dayNote').textContent=noSchool?'No classes today':rotationLabel+' · '+(day===3?'Wednesday schedule':'Regular block day');
+  $('upcomingDayType').textContent=rotationLabel;
+  $('selectedGradeLabel').textContent='Grade '+selectedGrade+' · '+rotationLabel+(noSchool?'':' · '+(day===3?'Wednesday':'Regular block day'));
+  $('statRotation').textContent=rotationLabel;
+  $('statDismissal').textContent=noSchool?'–':fmt(data[data.length-1].end);
+  $('progressCopy').textContent=Math.round(displayPct)+'%';
+  $('dayProgress').style.width=displayPct+'%';
+  $('dayRange').textContent=noSchool?'No classes today':fmt(data[0].start)+' - '+fmt(data[data.length-1].end);
+  if(noSchool||idx<0){
+    const before=current<start;
+    setMotionText($('currentPeriod'),noSchool?'No school':before?'Before school':'School day complete','words');
+    setMotionText($('countdown'),'–','chars');
+    $('statEnds').textContent=before&&!noSchool?fmt(data[0].start):'–';
+    $('ends').innerHTML=noSchool?'No classes today. The A/B rotation resumes on the next school day.':before?'School starts at <strong>'+fmt(data[0].start)+'</strong>':'The school day has ended';
+    document.title=rotationLabel+' · Orlando Science Bell Schedule';
+  }else{
+    const x=data[idx];
+    const remaining=Math.max(0,Math.ceil((mins(x.end)-current)*60));
+    maybeRingBell(now,view,x,remaining);
+    const h=Math.floor(remaining/3600),m=Math.floor((remaining%3600)/60);
+    setMotionText($('currentPeriod'),x.displayName,'words');
+    setMotionText($('countdown'),h?h+'h '+m+'m':m+'m','chars');
+    $('statEnds').textContent=fmt(x.end);
+    $('ends').innerHTML=(x.break?'Ends':'Class ends')+' at <strong>'+fmt(x.end)+'</strong>'+(x.periodNumber?' · Period '+x.periodNumber:'');
+    const titleMinutes=Math.max(1,Math.ceil(remaining/60));
+    const pCode=periodCode(x.periodNumber,rotation);
+    document.title=titleMinutes+'m | '+fmtTitleTime(x.end)+' | '+(pCode?'Period '+pCode:x.displayName);
+  }
+  renderUpcoming(data,current,idx,noSchool);
+  renderSchedule();
+}
 
 function initLenis(){if(reduceMotion.matches||typeof window.Lenis!=='function')return;lenis=new window.Lenis({autoRaf:true,smoothWheel:true,lerp:.085,wheelMultiplier:.9,anchors:true})}
 function scrollToId(id){const target=document.querySelector(id);if(!target)return;if(lenis)lenis.scrollTo(target,{offset:-96,duration:1});else target.scrollIntoView({behavior:reduceMotion.matches?'auto':'smooth',block:'start'})}

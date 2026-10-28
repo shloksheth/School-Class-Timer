@@ -1,0 +1,27 @@
+name: Teacher Mode validation
+on:
+  push:
+    branches: [feature/teacher-mode-complete]
+  pull_request:
+    paths: ['teacher-mode.js','teacher-mode.css','teacher-calendar.js','teacher-sw.js','index.html','tests/**']
+jobs:
+  static-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test tests/teacher-smoke.test.cjs
+
+  browser-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-save playwright@1.58.2
+      - run: google-chrome --version
+      - run: node tests/teacher-browser.test.cjs

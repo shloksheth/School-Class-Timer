@@ -98,3 +98,32 @@ html:not([data-app-role="teacher"]) #teacherNav {display:none!important}
 .tp-notice.error{color:#ff7996}
 @media(max-width:850px){.tp-grid{grid-template-columns:1fr}.tp-role-options{gap:10px}.tp-dialog-inner{grid-template-columns:1fr}.tp-side{flex-direction:row;overflow:auto}.tp-side button{white-space:nowrap}}
 @media(max-width:520px){.tp-role-options{grid-template-columns:1fr}.tp-welcome{padding:22px}.tp-panel{padding:15px}.tp-dialog{padding:17px}.tp-stats{gap:7px}.tp-stats .summary-card{padding:10px}.tp-stats .summary-value{font-size:15px}.tp-form{grid-template-columns:1fr}.tp-field{grid-column:1/-1}}
+
+html[data-app-role="teacher"] #grade,html[data-app-role="teacher"] #bellToggle{display:none!important}
+.tp-note-credit{font-size:9px;line-height:1.65;color:var(--muted);border-top:1px solid var(--line);padding:12px 0 2px}
+.tp-note-credit a{color:var(--ink);text-decoration:underline;text-underline-offset:3px}
+.tp-schedule-warning{padding:11px 12px;border-radius:12px;background:rgba(238,126,65,.10);color:var(--ink);font-size:10px;line-height:1.5;margin:8px 0}
+.tp-timer-pad{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}
+.tp-timer-pad button{min-height:46px;font-size:15px}
+.tp-bell-focus{color:var(--blue);font-weight:800}
+.tp-sound-item{padding:6px 0;border-bottom:1px solid var(--line)}
+.tp-letters{display:flex;flex-wrap:wrap;gap:5px;margin:10px 0}
+.tp-letters button{min-width:32px;padding:7px}
+.tp-calendar-tag{border:1px solid var(--line);border-radius:999px;padding:5px 10px;font-size:9px;font-weight:700;color:var(--muted)}
+
+.tp-slot-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-top:17px}
+.tp-slot{min-height:75px;border:1px solid var(--line-strong);border-radius:14px;background:var(--panel-soft);color:var(--ink);text-align:left;padding:12px;display:flex;flex-direction:column;align-items:start;justify-content:center;gap:5px}
+.tp-slot:hover:not(:disabled){border-color:var(--blue);background:var(--blue-soft)}
+.tp-slot.is-used{background:rgba(45,165,132,.11);border-color:rgba(45,165,132,.22)}
+.tp-slot strong{font-size:11px;font-weight:800;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tp-slot small{font-size:9px;color:var(--muted)}
+.tp-slot:disabled{opacity:.45}
+.tp-timer-pad button{font-variant-numeric:tabular-nums}
+
+.tp-day-arc{--arc-progress:0%;width:150px;height:150px;margin:14px auto;display:grid;place-items:center;border-radius:50%;background:conic-gradient(var(--blue) var(--arc-progress),var(--panel-soft) 0);position:relative;box-shadow:inset 0 1px 0 var(--glass-border)}
+.tp-day-arc:before{content:"";position:absolute;inset:14px;background:var(--panel-strong);border-radius:50%;border:1px solid var(--line)}
+.tp-day-arc-middle{position:relative;display:flex;flex-direction:column;align-items:center;gap:3px}
+.tp-day-arc-middle strong{font-size:25px;font-weight:800}
+.tp-day-arc-middle small{font-size:9px;color:var(--muted)}
+.tp-alerts-banner{margin:0 0 15px;padding:14px 16px;background:rgba(231,126,80,.15);border:1px solid rgba(221,129,81,.23);border-radius:15px;font-size:11px;line-height:1.7}
+.tp-alerts-banner strong{font-weight:800}

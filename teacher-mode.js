@@ -10,14 +10,14 @@ const CFG_KEY = 'oss-teacher-config-v1';
 const STATE_KEY = 'oss-teacher-state-v1';
 const SCHOOL_URL = 'https://script.google.com/macros/s/AKfycbyK0y5PNq5rJfvAAVGyctWzQhSYwjvACE3muXEAojeoQZYqvBlAdE_XXXrCC3i77kO5HA/exec';
 const defaults = {
-  teacherName:'',room:'',url:SCHOOL_URL,code:'',teacher:null,rosters:{},groups:{},
+  teacherName:'',room:'',url:SCHOOL_URL,code:'',teacher:null,rosters:{},groups:{},sections:{},gradeBand:'1011',calendarOverrides:{},hour24:false,countdownPassed:false,fullScreen:false,demoSpeed:1,demoAnchorMs:0,timeServer:'',timeOffsetMs:0,schoolSounds:[],
   startClose:10,endClose:10,useRule:true,allowOverride:false,slots:2,autoLeave:5,
   destinations:'Restroom:8\nLocker:3\nWater:3\nOffice:8\nNurse:8\nOther:8',
   timerEnabled:true,timerWarn:60,timerSound:'bell',timerWarnSound:'beep',timerVolume:35,
   agendaEnabled:true,agendaDaily:false,agendaLead:5,agenda:{},
-  weatherEnabled:false,cardsEnabled:false,alertsEnabled:false,messagesEnabled:false,
-  notificationsEnabled:false,notifyMin:5,notifySound:'bell',passEnabled:true,
-  demo:false,shiftSec:0,driftDaily:0,driftAt:Date.now(),pinHash:'',pinSalt:'',
+  weatherEnabled:false,cardsEnabled:false,cardSeconds:20,calendarCards:true,weatherCards:false,alertsEnabled:false,messagesEnabled:false,
+  notificationsEnabled:false,notifyMin:5,notify15:false,notify10:false,notify5:false,ringAtEnd:false,attentionSound:'beep',notifySound:'bell',passEnabled:true,
+  demo:false,testMode:false,shiftSec:0,driftDaily:0,driftAt:Date.now(),pinHash:'',pinSalt:'',
   boardId:'board-'+Math.random().toString(36).slice(2,8)
 };
 function parseStore(key, fallback) {
@@ -33,7 +33,7 @@ if(!Array.isArray(state.recent))state.recent=[];
 let role=localStorage.getItem(KEY);
 if(role!=='student'&&role!=='teacher')role=null;
 let weather=null,messages=[],lastWx=0,lastMsg=0,lastNotify='',requestCount=0,flushing=false;
-let choosing=false,chooserPeriod='',pendingLeave=null,lastTickKey='',activePane='connect';
+let choosing=false,chooserPeriod='',pendingLeave=null,lastTickKey='',activePane='connect',previousBellRemain=null,previousBellCode='',pickerCandidates=[],pickerLetter='',timerDigits='',lastCardId='';
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const val=id=>byId(id)?.value||'';
 const checked=id=>!!byId(id)?.checked;
@@ -43,17 +43,37 @@ const timeLabel=n=>new Date(n).toLocaleTimeString([],{hour:'numeric',minute:'2-d
 const secDay=d=>d.getHours()*3600+d.getMinutes()*60+d.getSeconds();
 const mins=s=>{const p=String(s||'0:00').split(':').map(Number);return p[0]*60+p[1];};
 const save=()=>{localStorage.setItem(CFG_KEY,JSON.stringify(cfg));localStorage.setItem(STATE_KEY,JSON.stringify(state));};
-const nowDate=()=>new Date(Date.now()+Number(cfg.shiftSec||0)*1000+Number(cfg.driftDaily||0)*((Date.now()-(cfg.driftAt||Date.now()))/86400000)*1000);
+const nowDate=()=>new Date((cfg.demo&&cfg.demoAnchorMs?cfg.demoAnchorMs+Math.max(0,Date.now()-(cfg.demoStarted||Date.now()))*Number(cfg.demoSpeed||1):Date.now())+Number(cfg.shiftSec||0)*1000+Number(cfg.driftDaily||0)*((Date.now()-(cfg.driftAt||Date.now()))/86400000)*1000+(cfg.demo?0:Number(cfg.timeOffsetMs||0)));
+let soundNames=[],soundDb=null;const soundBlobCache=new Map();
 const iso=d=>[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');
-const sectionCode=row=>row&&row.periodNumber?(/^[AB]$/.test(rotationForDate(nowDate())||'')?rotationForDate(nowDate()):'')+((row.periodNumber-1)%4+1):'';
-function schedule() {
-  const now=nowDate(),rotation=rotationForDate(now);
-  const view=now.getDay()===3?'wednesday':'regular';
-  const rows=decoratedData(view,now);
-  const s=secDay(now),current=rotation?rows.find(r=>s>=mins(r.start)*60&&s<mins(r.end)*60):null;
-  const classRow=current&&current.periodNumber?current:null;
-  const next=rotation?rows.find(r=>r.periodNumber&&mins(r.start)*60>s):null;
-  return {now,rotation,rows,current,classRow,next,code:sectionCode(classRow),seconds:s};
+const sectionCode=(row,rotation)=>{
+ if(!row||!row.periodNumber||!rotation)return '';
+ return rotation+((row.periodNumber-1)%4+1);
+};
+function schoolCalendarInfo(now){
+ const day=iso(now),over=cfg.calendarOverrides?.[day],entry=window.CALENDAR?.[day];
+ if(over==='noschool')return {rotation:null,type:'noschool'};
+ if(over&&/^[AB]_(regular|wednesday)$/.test(over))return {rotation:over[0],type:over.split('_')[1]};
+ if(entry){const m=/^([AB]) Day (Regular|Wednesday)$/.exec(entry);if(m)return {rotation:m[1],type:m[2].toLowerCase()};}
+ return {rotation:null,type:'noschool'};
+}
+function schedule(){
+ const now=nowDate(),day=iso(now),info=schoolCalendarInfo(now),rotation=info.rotation;
+ const band=cfg.gradeBand==='912'?'912':'1011';
+ const source=window.SCHEDULE_TABLES?.[band]?.[info.type]?.rows||[];
+ const rows=source.map(item=>{
+   const match=/^Period ([1-4])$/.exec(item.label),slot=match?Number(match[1]):null;
+   const periodNumber=slot?(rotation==='A'?slot:slot+4):null;
+   const code=sectionCode({periodNumber},rotation),section=cfg.sections?.[code];
+   return {name:item.label,displayName:section?.course?.trim()||item.label,
+     type:item.type,break:item.type!=='class',periodNumber,
+     start:item.start,end:item.end,dur:mins(item.end)-mins(item.start),
+     room:section?.room||'',slot,code};
+ });
+ const seconds=secDay(now),current=rows.find(r=>seconds>=mins(r.start)*60&&seconds<mins(r.end)*60)||null;
+ const classRow=current&&current.periodNumber?current:null;
+ const next=rows.find(r=>r.periodNumber&&mins(r.start)*60>seconds)||null;
+ return {now,day,band,timeType:info.type,rotation,rows,current,classRow,next,code:sectionCode(classRow,rotation),seconds};
 }
 function windowState(sc) {
   const row=sc.classRow;
@@ -80,16 +100,16 @@ function hasTeacher(){return Boolean(cfg.demo||(cfg.teacher&&cfg.teacher.ok===tr
 function panelHTML(){
   return '<main class="content-shell" id="teacherDashboard" hidden>'+
     '<div class="tp-toolbar"><div><div class="tp-kicker">Teacher mode</div><h1 id="tpRoomTitle">Classroom dashboard</h1><p id="tpSubTitle">Hall passes, lesson timing and classroom tools</p></div>'+
-    '<div class="tp-actions"><button class="liquid-btn" data-tp-action="changeMode">Change mode</button><button class="liquid-btn primary-action" data-tp-action="openTeacherSettings">Teacher settings</button></div></div>'+
-    '<div class="tp-grid"><div>'+
+    '<div class="tp-actions"><button class="liquid-btn" data-tp-action="attentionSignal">Attention</button><button class="liquid-btn" data-tp-action="changeMode">Change mode</button><button class="liquid-btn primary-action" data-tp-action="openTeacherSettings">Teacher settings</button></div></div>'+
+    '<div id="tpAlertsBanner" class="tp-alerts-banner" hidden></div>'+'<section id="tpDemoPanel" class="tp-panel" hidden style="margin-bottom:15px"><div class="tp-panel-head"><h2>Demo controls</h2><span class="tp-mini" id="tpDemoTime"></span></div><div class="tp-row"><button class="tp-smallbtn" data-tp-action="demoJumpClosed">Passes closed</button><button class="tp-smallbtn" data-tp-action="demoJumpOpen">Passes open</button><button class="tp-smallbtn" data-tp-action="demoJumpLate">End of class</button><button class="tp-smallbtn" data-tp-action="demoJumpNext">Next school day</button><button class="tp-smallbtn" data-tp-action="demoSpeedToggle">Change speed</button></div><p class="tp-muted">Demo only. Uses sample students. Nothing is saved to the school log.</p></section>'+'<div class="tp-grid"><div>'+
       '<section class="tp-panel"><div class="tp-panel-head"><span class="tp-status" id="tpStatus" data-status="between">School schedule</span><span class="tp-mini" id="tpDate"></span></div>'+
         '<div class="tp-headline" id="tpPeriod">Loading...</div><div class="tp-muted" id="tpPeriodMeta"></div>'+
-        '<div class="tp-inline"><div><div class="tp-clock" id="tpCountdown">--:--</div><div class="tp-subclock" id="tpCountdownLabel">Until next transition</div></div><div class="tp-row"><button class="tp-smallbtn" data-tp-action="shiftMinus">-1s</button><button class="tp-smallbtn" data-tp-action="shiftPlus">+1s</button></div></div>'+
-        '<div id="tpLessonTrack" class="tp-progress" aria-label="Lesson progress"></div><div class="tp-inline"><span class="tp-mini" id="tpOpenAt"></span><span class="tp-mini" id="tpCloseAt"></span></div>'+
+        '<div class="tp-inline"><div><div class="tp-clock" id="tpCountdown">--:--</div><div class="tp-subclock" id="tpCountdownLabel">Until next transition</div></div><div class="tp-row"><button class="tp-smallbtn" data-tp-action="shiftMinus">-1s</button><button class="tp-smallbtn" data-tp-action="shiftPlus">+1s</button><button class="tp-smallbtn" data-tp-action="toggleFullscreen">Full screen</button></div></div>'+
+        '<div id="tpLessonTrack" class="tp-progress" aria-label="Lesson progress"></div><div class="tp-inline"><span class="tp-mini" id="tpOpenAt"></span><span class="tp-mini" id="tpCloseAt"></span></div><div class="tp-mini" id="tpGroups"></div>'+
         '<div class="tp-stats"><article class="summary-card"><div class="summary-label">Rotation</div><div class="summary-value" id="tpRotation">-</div></article><article class="summary-card"><div class="summary-label">Passes out</div><div class="summary-value" id="tpOut">0</div></article><article class="summary-card"><div class="summary-label">Current time</div><div class="summary-value" id="tpRealTime">--:--</div></article></div>'+
       '</section>'+
       '<section class="tp-panel"><div class="tp-panel-head"><h2>Hall passes</h2><span class="tp-mini" id="tpConnection">Connect a teacher code</span></div>'+
-        '<div class="tp-row"><button class="liquid-btn primary-action" data-tp-action="newPass" id="tpNewPass">+ Start a pass</button><span class="tp-muted" id="tpPassHint"></span></div><div id="tpPassList" class="tp-section"></div></section>'+
+        '<div class="tp-row"><button class="liquid-btn primary-action" data-tp-action="newPass" id="tpNewPass">+ Start a pass</button><span class="tp-muted" id="tpPassHint"></span></div><div id="tpSlotGrid" class="tp-slot-grid" aria-label="Available hall pass slots"></div><div id="tpPassList" class="tp-section"></div></section>'+
       '<section class="tp-panel" id="tpAgendaPanel"><div class="tp-panel-head"><h2>Lesson agenda</h2><button class="tp-smallbtn" data-tp-action="editAgenda">Edit</button></div><div id="tpAgendaContent" class="tp-agenda-list tp-muted">No agenda for this period.</div></section>'+
       '<section class="tp-panel"><div class="tp-panel-head"><h2>Bell schedule</h2><span id="tpScheduleType" class="tp-mini"></span></div><div id="tpScheduleRows" class="tp-stack"></div></section>'+
     '</div><div>'+
@@ -121,7 +141,7 @@ function teacherSettingsHTML() {
   '<div class="tp-field full"><label>Teacher code from the school</label><input id="tpCodeInput" type="password" autocomplete="off" placeholder="Personal teacher code"></div>'+
   '<div class="tp-field full"><label>Google Apps Script web app URL</label><input id="tpUrlInput" type="url" placeholder="https://script.google.com/macros/s/.../exec"></div>'+
   '<div class="tp-field"><label>Display name</label><input id="tpTeacherName"></div><div class="tp-field"><label>Room</label><input id="tpRoomInput"></div>'+
-  '<div class="tp-field full"><div class="tp-row"><button class="liquid-btn primary-action" type="button" data-tp-action="connectTeacher">Check code and load classes</button><button type="button" class="liquid-btn" data-tp-action="disconnectTeacher">Disconnect</button></div></div>'+
+  '<div class="tp-field"><label>Bell schedule group</label><select id="tpGradeBand"><option value="1011">10th–11th Grade</option><option value="912">9th–12th Grade</option></select></div><div class="tp-field"><label>Clock style</label><select id="tpHourMode"><option value="12">12-hour</option><option value="24">24-hour</option></select></div><div class="tp-field full"><div class="tp-row"><button class="liquid-btn primary-action" type="button" data-tp-action="connectTeacher">Check code and load classes</button><button type="button" class="liquid-btn" data-tp-action="disconnectTeacher">Disconnect</button></div></div>'+
   '<div class="tp-field full tp-muted" id="tpTeacherMsg">Student rosters are only loaded after the school verifies the code.</div></div></section>'+
   '<section class="tp-pane" id="tpPane-passes" hidden><div class="tp-form">'+
   '<div class="tp-field"><label>Close first (minutes)</label><input id="tpCloseStart" type="number" min="0" max="60"></div><div class="tp-field"><label>Close last (minutes)</label><input id="tpCloseEnd" type="number" min="0" max="60"></div>'+
@@ -130,7 +150,7 @@ function teacherSettingsHTML() {
   '<div class="tp-field full"><label><input type="checkbox" id="tpRuleEnabled">Enforce 10/10 rule</label></div>'+
   '<div class="tp-field full"><label><input type="checkbox" id="tpAllowOverride">Allow one-time teacher override while closed</label></div>'+
   '<div class="tp-field full"><label><input type="checkbox" id="tpPassEnabled">Enable pass buttons</label></div>'+
-  '<div class="tp-field full"><label><input type="checkbox" id="tpDemo">Demo passes with sample names (never sent to Google Sheets)</label></div>'+
+  '<div class="tp-field full"><label><input type="checkbox" id="tpDemo">Demo passes with sample names (never sent to Google Sheets)</label></div><div class="tp-field full"><label><input type="checkbox" id="tpTestMode">Log verified test trips as TEST instead of LIVE</label></div><div class="tp-field full"><h3>Pass history</h3><div id="tpHistoryList" class="tp-stack"></div></div>'+
   '</div></section>'+
   '<section class="tp-pane" id="tpPane-timer" hidden><div class="tp-form">'+
   '<div class="tp-field full"><label><input type="checkbox" id="tpTimerEnabled">Show classroom timer</label></div>'+
@@ -138,10 +158,10 @@ function teacherSettingsHTML() {
   '<div class="tp-field"><label>Sound volume (%)</label><input id="tpTimerVolume" type="number" min="0" max="100"></div>'+
   '<div class="tp-field"><label>Timer end sound</label><select id="tpTimerSound"><option value="bell">School bell</option><option value="beep">Short chime</option><option value="none">Off</option></select></div>'+
   '<div class="tp-field"><label>Timer warning sound</label><select id="tpTimerWarningSound"><option value="beep">Short chime</option><option value="bell">School bell</option><option value="none">Off</option></select></div>'+
-  '<div class="tp-field full"><label><input type="checkbox" id="tpNotifications">Bell countdown notifications</label></div>'+
+  '<div class="tp-field full"><label><input type="checkbox" id="tpNotifications">Bell countdown notifications</label></div><div class="tp-field full tp-row"><label><input type="checkbox" id="tpNotify15">15 minutes</label><label><input type="checkbox" id="tpNotify10">10 minutes</label><label><input type="checkbox" id="tpNotify5">5 minutes</label></div><div class="tp-field full"><label><input type="checkbox" id="tpRingAtEnd">Ring bell at class end</label></div>'+
   '<div class="tp-field"><label>Alert before class ends (min)</label><input id="tpNotifyMin" type="number" min="1" max="30"></div>'+
   '<div class="tp-field"><label>Bell notification sound</label><select id="tpNotifySound"><option value="bell">School bell</option><option value="beep">Short chime</option><option value="none">Off</option></select></div>'+
-  '<div class="tp-field full"><button class="liquid-btn" type="button" data-tp-action="testTeacherSound">Test selected end sound</button></div>'+
+  '<div class="tp-field full"><button class="liquid-btn" type="button" data-tp-action="testTeacherSound">Test selected end sound</button></div><div class="tp-field full"><label>Attention signal</label><select id="tpAttentionSound"><option value="beep">Short chime</option><option value="bell">School bell</option><option value="none">Off</option></select></div><div class="tp-field full"><h3>Sound library</h3><p class="tp-muted">Add your own short audio files. Each sound can be selected independently for timer end, warning, and bell notification. Files are stored on this device for offline use.</p><input type="file" accept="audio/mpeg,audio/mp3,audio/wav,audio/ogg,audio/mp4,audio/aac" id="tpSoundUpload" multiple aria-label="Upload classroom sounds"><div class="tp-row" style="margin-top:8px"><button class="liquid-btn" type="button" data-tp-action="refreshSchoolSounds">Find school sounds in GitHub folder</button></div><div id="tpSoundLibrary" class="tp-stack"></div></div>'+
   '</div></section>'+
   '<section class="tp-pane" id="tpPane-agenda" hidden><div class="tp-form">'+
   '<div class="tp-field full"><label><input type="checkbox" id="tpAgendaEnabled">Display lesson agenda</label></div>'+
@@ -149,11 +169,11 @@ function teacherSettingsHTML() {
   '<div class="tp-field"><label>Show minutes before class</label><input id="tpAgendaLead" type="number" min="0" max="30"></div>'+
   '<div class="tp-field full"><label>Agenda (one item per line, use [x] for completed)</label><textarea id="tpAgendaText" rows="7" placeholder="Warm-up&#10;Review yesterday&#10;Practice problems"></textarea></div>'+
   '<div class="tp-field full"><label><input type="checkbox" id="tpAgendaDaily">Clear agenda the next day</label></div>'+
-  '<div class="tp-field full"><button class="liquid-btn" type="button" data-tp-action="saveAgenda">Save agenda for selected class</button></div>'+
+  '<div class="tp-field full"><button class="liquid-btn" type="button" data-tp-action="saveAgenda">Save agenda for selected class</button></div><div class="tp-field"><label>Copy agenda to</label><select id="tpAgendaCopyTo"><option>A1</option><option>A2</option><option>A3</option><option>A4</option><option>B1</option><option>B2</option><option>B3</option><option>B4</option></select></div><div class="tp-field"><label>&nbsp;</label><button class="liquid-btn" type="button" data-tp-action="copyAgenda">Copy this agenda</button></div>'+
   '</div></section>'+
   '<section class="tp-pane" id="tpPane-extras" hidden><div class="tp-form">'+
   '<div class="tp-field full"><label><input type="checkbox" id="tpWeatherEnabled">Orlando weather (Open-Meteo)</label></div>'+
-  '<div class="tp-field full"><label><input type="checkbox" id="tpCardsEnabled">Rotating classroom cards and questions</label></div>'+
+  '<div class="tp-field full"><label><input type="checkbox" id="tpCardsEnabled">Rotating classroom cards and questions</label></div><div class="tp-field full"><label>Seconds between classroom cards</label><input id="tpCardSeconds" type="number" min="5" max="120"></div><div class="tp-field full"><label><input type="checkbox" id="tpCalendarCards">School calendar countdown cards</label></div><div class="tp-field full"><label><input type="checkbox" id="tpWeatherCards">Weather information in cards</label></div>'+
   '<div class="tp-field full"><label><input type="checkbox" id="tpMessagesEnabled">School announcements from script</label></div>'+
   '<div class="tp-field full"><label><input type="checkbox" id="tpAlertsEnabled">Weather alerts from script</label></div>'+
   '<div class="tp-field full tp-muted">These extras start off by default and can be enabled separately. School announcements and weather alerts depend on the connected script.</div></div></section>'+
@@ -163,16 +183,17 @@ function teacherSettingsHTML() {
   '<div class="tp-field full"><button class="liquid-btn" type="button" data-tp-action="resetDrift">The school bell was reset</button></div>'+
   '<div class="tp-field full"><label>Settings PIN (optional, 4 to 12 digits)</label><input type="password" id="tpPinNew" inputmode="numeric" maxlength="12" autocomplete="off" placeholder="Leave blank to keep current PIN"></div>'+
   '<div class="tp-field full"><div class="tp-row"><button class="liquid-btn" type="button" data-tp-action="setPin">Set or replace PIN</button><button class="liquid-btn" type="button" data-tp-action="removePin">Remove PIN</button></div></div>'+
-  '<div class="tp-field full"><button class="liquid-btn" type="button" data-tp-action="flushQueue">Retry waiting logs</button> <span class="tp-mini" id="tpQueueCount"></span></div>'+
+  '<div class="tp-field full"><label>School day override (only this board)</label></div><div class="tp-field"><label>Date</label><input type="date" id="tpOverrideDate"></div><div class="tp-field"><label>Set day to</label><select id="tpOverrideType"><option value="">School calendar default</option><option value="noschool">No school</option><option value="A_regular">A Day Regular</option><option value="B_regular">B Day Regular</option><option value="A_wednesday">A Day Wednesday</option><option value="B_wednesday">B Day Wednesday</option></select></div><div class="tp-field full"><button class="liquid-btn" type="button" data-tp-action="saveOverride">Save calendar override</button></div><div class="tp-field full"><label><input type="checkbox" id="tpCountdownPassed">Show time passed rather than remaining</label></div><div class="tp-field"><label>Demo clock speed</label><select id="tpDemoSpeed"><option value="1">Normal</option><option value="10">10× speed</option><option value="30">30× speed</option><option value="60">60× speed</option></select></div><div class="tp-field full"><label>Local time synchronization URL (optional, UTC JSON)</label><input type="url" id="tpTimeServer" placeholder="https://..."></div><div class="tp-field full"><button class="liquid-btn" type="button" data-tp-action="syncTime">Sync clock with time server</button> <span class="tp-mini" id="tpSyncStatus"></span></div><div class="tp-field full"><button class="liquid-btn" type="button" data-tp-action="flushQueue">Retry waiting logs</button> <span class="tp-mini" id="tpQueueCount"></span></div>'+
   '<div class="tp-field full"><button class="liquid-btn" type="button" data-tp-action="exportTrips">Export recent passes (CSV)</button></div>'+
   '<div class="tp-field full"><p class="tp-muted">Teacher codes and student rosters are stored locally on this device for offline use. Use Disconnect on a shared device to clear them. PIN is a local classroom deterrent, not a substitute for a secured school device.</p></div>'+
   '</div></section>'+
+  '<div class="tp-note-credit">Hall Pass Board features and original school schedule data by Shamil Ganiev, 2026. Free School Use License. <a href="HALLPASS-LICENSE.md" target="_blank" rel="noopener">License and permitted use</a>. <a href="HALLPASS-THIRD-PARTY-NOTICES.md" target="_blank" rel="noopener">Third-party notices</a>. Weather from Open-Meteo and the National Weather Service.</div>'+
   '<div class="tp-foot"><span class="tp-mini" id="tpSettingsNotice"></span><button class="liquid-btn primary-action" data-tp-action="saveTeacherSettings">Save changes</button></div>'+
   '</div></div></section></div>';
 }
 function pickerHTML(){
   return '<div class="tp-modal tp-picker" id="tpPick" hidden><section class="tp-dialog" role="dialog" aria-modal="true" aria-labelledby="tpPickTitle"><div class="tp-toolbar"><div><div class="tp-kicker">Hall pass</div><h2 id="tpPickTitle">Start a pass</h2></div><button class="liquid-btn" data-tp-action="closePick">Close</button></div>'+
-  '<div class="tp-form"><div class="tp-field"><label>Student</label><select id="tpStudent"></select></div><div class="tp-field" id="tpGuestWrap" hidden><label>Guest student name</label><input id="tpGuestName" maxlength="70"></div>'+
+  '<div class="tp-form"><div class="tp-field full"><label>Find a student (or choose a first letter)</label><input id="tpStudentSearch" type="search" placeholder="Start typing a name"><div class="tp-letters" id="tpStudentLetters"></div></div><div class="tp-field"><label>Student</label><select id="tpStudent"></select></div><div class="tp-field" id="tpGuestWrap" hidden><label>Guest student name</label><input id="tpGuestName" maxlength="70"></div>'+
   '<div class="tp-field"><label>Destination</label><select id="tpDestination"></select></div></div>'+
   '<div id="tpPickWarning" class="tp-inline-status"></div><div class="tp-foot"><button class="liquid-btn" data-tp-action="closePick">Cancel</button><button class="liquid-btn primary-action" id="tpConfirmPass" data-tp-action="confirmPass">Start pass</button></div></section></div>';
 }
@@ -180,6 +201,7 @@ function timerDialogHTML(){
  return '<div class="tp-modal" id="tpTimerDialog" hidden><section class="tp-dialog" style="max-width:480px" role="dialog" aria-modal="true"><div class="tp-toolbar"><h2>Set classroom timer</h2><button class="liquid-btn" data-tp-action="timerDialogClose">Close</button></div><div class="tp-form" style="margin-top:18px">'+
  '<div class="tp-field"><label>Minutes</label><input id="tpTimerMinutes" type="number" min="0" max="999"></div><div class="tp-field"><label>Seconds</label><input id="tpTimerSeconds" type="number" min="0" max="59"></div></div>'+
  '<div class="tp-pills tp-section">'+[-60,-10,10,60,300].map(n=>'<button class="tp-smallbtn" data-tp-action="timerAdjust" data-sec="'+n+'">'+(n>0?'+':'')+n+'s</button>').join('')+'</div>'+
+ '<div class="tp-section"><h3>Quick keypad</h3><div class="tp-timer-pad">'+[1,2,3,4,5,6,7,8,9,0,"00","⌫"].map(k=>'<button type="button" class="tp-smallbtn" data-tp-action="timerKey" data-key="'+k+'">'+k+'</button>').join('')+'</div><p class="tp-muted">Enter digits like a microwave. For example, 1500 means 15 minutes.</p><div id="tpTimerRecent" class="tp-pills"></div></div>'+
  '<div class="tp-foot"><button class="liquid-btn" data-tp-action="timerSet">Set without starting</button><button class="liquid-btn primary-action" data-tp-action="timerSetStart">Set and start</button></div></section></div>';
 }
 function attach(){
@@ -191,8 +213,8 @@ function attach(){
   settingsMain.insertBefore(quick,byId('editorEmpty'));
   byId('tpSwitchSettings').addEventListener('click',()=>{if(typeof hasUnsavedProfileChanges==='function'&&hasUnsavedProfileChanges()){requestCloseSettings();return;} if(typeof finalizeCloseSettings==='function')finalizeCloseSettings();showRoleChooser();});
   nav.addEventListener('click',()=>{if(role==='teacher'){window.scrollTo({top:0,behavior:'smooth'}); nav.classList.add('active');}});
-  document.addEventListener('click',onClick);
-  byId('tpStudent').addEventListener('change',()=>{byId('tpGuestWrap').hidden=val('tpStudent')!=='__guest';});
+  document.addEventListener('click',onClick);byId('tpSoundUpload').addEventListener('change',uploadSounds);loadSounds();
+  byId('tpStudent').addEventListener('change',()=>{byId('tpGuestWrap').hidden=val('tpStudent')!=='__guest';});byId('tpStudentSearch').addEventListener('input',()=>{pickerLetter='';renderStudentChoices();});
   byId('tpAgendaSection').addEventListener('change',showAgendaEditor);
   document.addEventListener('keydown',e=>{if(e.key!=='Escape')return;if(!byId('tpPick').hidden)closePick();else if(!byId('tpTimerDialog').hidden)byId('tpTimerDialog').hidden=true;else if(!byId('tpSettings').hidden)closeSettings();});
   const hash=new URLSearchParams(location.hash.replace(/^#/,''));
@@ -203,7 +225,7 @@ function attach(){
   setTimeout(()=>{if(role==='teacher'){tick();if(cfg.code&&!cfg.demo)verifyTeacher(false);}},350);
 }
 function showRoleChooser(){byId('tpRoleCover').hidden=false;document.body.style.overflow='hidden';byId('tpRoleHeading').focus?.();}
-function setRole(next){role=next;localStorage.setItem(KEY,role);byId('tpRoleCover').hidden=true;document.body.style.overflow='';activate(role);}
+function setRole(next){role=next;localStorage.setItem(KEY,role);byId('tpRoleCover').hidden=true;document.body.style.overflow='';activate(role);if(next==='teacher'&&!cfg.code&&!cfg.demo)openSettings('connect');}
 function activate(next){
   if(!next){document.documentElement.removeAttribute('data-app-role');showRoleChooser();return;}
   document.documentElement.dataset.appRole=next;
@@ -226,39 +248,45 @@ async function openSettings(pane){
   byId('tpCodeInput').value=cfg.code||'';byId('tpUrlInput').value=cfg.url||SCHOOL_URL;
   const values={tpTeacherName:cfg.teacherName,tpRoomInput:cfg.room,tpCloseStart:cfg.startClose,tpCloseEnd:cfg.endClose,tpSlots:cfg.slots,tpAutoLeave:cfg.autoLeave,
     tpDestinations:cfg.destinations,tpTimerWarn:cfg.timerWarn,tpTimerSound:cfg.timerSound,tpTimerWarningSound:cfg.timerWarnSound,
-    tpTimerVolume:cfg.timerVolume,tpNotifyMin:cfg.notifyMin,tpNotifySound:cfg.notifySound,tpAgendaLead:cfg.agendaLead,tpShift:cfg.shiftSec,tpDrift:cfg.driftDaily};
+    tpTimerVolume:cfg.timerVolume,tpNotifyMin:cfg.notifyMin,tpNotifySound:cfg.notifySound,tpAgendaLead:cfg.agendaLead,tpShift:cfg.shiftSec,tpDrift:cfg.driftDaily,tpCardSeconds:cfg.cardSeconds,tpTimeServer:cfg.timeServer||''};
   Object.entries(values).forEach(([k,v])=>{if(byId(k))byId(k).value=v;});
-  const toggles={tpRuleEnabled:cfg.useRule,tpAllowOverride:cfg.allowOverride,tpPassEnabled:cfg.passEnabled,tpDemo:cfg.demo,
-    tpTimerEnabled:cfg.timerEnabled,tpNotifications:cfg.notificationsEnabled,tpAgendaEnabled:cfg.agendaEnabled,tpAgendaDaily:cfg.agendaDaily,
-    tpWeatherEnabled:cfg.weatherEnabled,tpCardsEnabled:cfg.cardsEnabled,tpAlertsEnabled:cfg.alertsEnabled,tpMessagesEnabled:cfg.messagesEnabled};
+  const toggles={tpRuleEnabled:cfg.useRule,tpAllowOverride:cfg.allowOverride,tpPassEnabled:cfg.passEnabled,tpDemo:cfg.demo,tpTestMode:cfg.testMode,
+    tpTimerEnabled:cfg.timerEnabled,tpNotifications:cfg.notificationsEnabled,tpNotify15:cfg.notify15,tpNotify10:cfg.notify10,tpNotify5:cfg.notify5,tpRingAtEnd:cfg.ringAtEnd,tpAgendaEnabled:cfg.agendaEnabled,tpAgendaDaily:cfg.agendaDaily,
+    tpWeatherEnabled:cfg.weatherEnabled,tpCardsEnabled:cfg.cardsEnabled,tpCalendarCards:cfg.calendarCards,tpWeatherCards:cfg.weatherCards,tpAlertsEnabled:cfg.alertsEnabled,tpMessagesEnabled:cfg.messagesEnabled};
   Object.entries(toggles).forEach(([k,v])=>{if(byId(k))byId(k).checked=!!v;});
-  byId('tpSettingsNotice').textContent='';byId('tpQueueCount').textContent=state.queue.length+' waiting';
-  byId('tpTeacherMsg').textContent=cfg.teacher?.ok?'Connected as '+esc(cfg.teacher.display||cfg.teacher.name):'No verified teacher code. Student names and live pass logging are locked.';
+  byId('tpAttentionSound').value=cfg.attentionSound||'beep';byId('tpGradeBand').value=cfg.gradeBand||'1011';byId('tpHourMode').value=cfg.hour24?'24':'12';byId('tpCountdownPassed').checked=!!cfg.countdownPassed;byId('tpDemoSpeed').value=String(cfg.demoSpeed||1);byId('tpOverrideDate').value=iso(new Date());byId('tpOverrideType').value=cfg.calendarOverrides?.[iso(new Date())]||'';byId('tpSettingsNotice').textContent='';byId('tpQueueCount').textContent=state.queue.length+' waiting';refreshSoundOptions();byId('tpTimerSound').value=cfg.timerSound;byId('tpTimerWarningSound').value=cfg.timerWarnSound;byId('tpNotifySound').value=cfg.notifySound;byId('tpAttentionSound').value=cfg.attentionSound;
+  byId('tpTeacherMsg').textContent=cfg.teacher?.ok?'Connected as '+(cfg.teacher.display||cfg.teacher.name):'No verified teacher code. Student names and live pass logging are locked.';byId('tpHistoryList').innerHTML=state.recent.length?state.recent.slice(0,25).map(t=>'<div class="tp-log-line"><strong>'+esc(t.student)+'</strong> · '+esc(t.where)+' · '+esc(t.status)+'<div class="tp-mini">'+esc(t.section)+' · '+esc(t.duration)+' · '+esc(t.when)+'</div></div>').join(''):'<p class="tp-muted">No passes completed on this device yet.</p>';
   showPane(pane||'connect');byId('tpSettings').hidden=false;
 }
 function closeSettings(){byId('tpSettings').hidden=true;}
 function saveTeacherSettings(){
-  cfg.teacherName=val('tpTeacherName').trim().slice(0,70);cfg.room=val('tpRoomInput').trim().slice(0,40);
+  cfg.teacherName=val('tpTeacherName').trim().slice(0,70);cfg.room=val('tpRoomInput').trim().slice(0,40);cfg.gradeBand=val('tpGradeBand')==='912'?'912':'1011';cfg.hour24=val('tpHourMode')==='24';cfg.countdownPassed=checked('tpCountdownPassed');cfg.cardSeconds=clamp(val('tpCardSeconds'),5,120);cfg.calendarCards=checked('tpCalendarCards');cfg.weatherCards=checked('tpWeatherCards');if(cfg.demoSpeed!==Number(val('tpDemoSpeed'))){cfg.demoSpeed=Number(val('tpDemoSpeed'))||1;cfg.demoStarted=Date.now();}
   cfg.startClose=clamp(val('tpCloseStart'),0,60);cfg.endClose=clamp(val('tpCloseEnd'),0,60);
   cfg.slots=clamp(val('tpSlots'),1,200);cfg.autoLeave=clamp(val('tpAutoLeave'),0,30);
   cfg.destinations=val('tpDestinations').trim().slice(0,1500);
   cfg.useRule=checked('tpRuleEnabled');cfg.allowOverride=checked('tpAllowOverride');cfg.passEnabled=checked('tpPassEnabled');
   cfg.timerEnabled=checked('tpTimerEnabled');cfg.timerWarn=clamp(val('tpTimerWarn'),0,3600);
   cfg.timerSound=val('tpTimerSound');cfg.timerWarnSound=val('tpTimerWarningSound');cfg.timerVolume=clamp(val('tpTimerVolume'),0,100);
-  cfg.notificationsEnabled=checked('tpNotifications');cfg.notifyMin=clamp(val('tpNotifyMin'),1,30);cfg.notifySound=val('tpNotifySound');
+  cfg.notificationsEnabled=checked('tpNotifications');cfg.notifyMin=clamp(val('tpNotifyMin'),1,30);cfg.notifySound=val('tpNotifySound');cfg.notify15=checked('tpNotify15');cfg.notify10=checked('tpNotify10');cfg.notify5=checked('tpNotify5');cfg.ringAtEnd=checked('tpRingAtEnd');cfg.attentionSound=val('tpAttentionSound');
   cfg.agendaEnabled=checked('tpAgendaEnabled');cfg.agendaDaily=checked('tpAgendaDaily');cfg.agendaLead=clamp(val('tpAgendaLead'),0,30);
   cfg.weatherEnabled=checked('tpWeatherEnabled');cfg.cardsEnabled=checked('tpCardsEnabled');cfg.messagesEnabled=checked('tpMessagesEnabled');cfg.alertsEnabled=checked('tpAlertsEnabled');
   cfg.shiftSec=clamp(val('tpShift'),-600,600);cfg.driftDaily=clamp(val('tpDrift'),-10,10);
-  cfg.demo=checked('tpDemo');
-  cfg.url=val('tpUrlInput').trim()||SCHOOL_URL;
+  const demoWasEnabled=!!cfg.demo;cfg.demo=checked('tpDemo');cfg.testMode=checked('tpTestMode');if(cfg.demo&&!demoWasEnabled)demoJump('open',true);if(!cfg.demo){cfg.demoStarted=0;cfg.demoAnchorMs=0;}
+  cfg.url=val('tpUrlInput').trim()||SCHOOL_URL;cfg.timeServer=val('tpTimeServer').trim();
   if(cfg.url&&!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec(?:\?.*)?$/.test(cfg.url)){byId('tpSettingsNotice').textContent='The script URL must be a Google Apps Script /exec HTTPS address.';return;}
   const code=val('tpCodeInput').trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
-  if(code!==cfg.code){cfg.code=code;cfg.teacher=null;cfg.rosters={};cfg.groups={};}
+  if(code!==cfg.code){cfg.code=code;cfg.teacher=null;cfg.rosters={};cfg.groups={};cfg.sections={};}
   save();byId('tpSettingsNotice').textContent='Saved.';tick();
 }
 function showAgendaEditor(){
   const section=val('tpAgendaSection')||'A1';
   byId('tpAgendaText').value=(cfg.agenda[section]||{}).text||'';
+}
+function copyAgenda(){
+ const from=val('tpAgendaSection'),to=val('tpAgendaCopyTo');
+ if(!from||!to||from===to){byId('tpSettingsNotice').textContent='Choose a different class to copy to.';return;}
+ cfg.agenda[to]={text:val('tpAgendaText').slice(0,5000),date:iso(nowDate())};
+ save();byId('tpSettingsNotice').textContent='Copied '+from+' agenda to '+to+'.';
 }
 function saveAgenda(){
   cfg.agenda[val('tpAgendaSection')||'A1']={text:val('tpAgendaText').slice(0,5000),date:iso(nowDate())};
@@ -296,15 +324,15 @@ async function verifyTeacher(manual){
     const result=await schoolRequest('hello');
     if(result.ok&&result.role==='teacher'&&Array.isArray(result.sections)){
       cfg.teacher={ok:true,name:result.teacher,display:result.display||result.teacher,checkedAt:Date.now()};
-      const rosters={},groups={};const rooms={};
+      const rosters={},groups={},sections={};const rooms={};
       result.sections.forEach(sec=>{
         const code=String(sec.block||'');
         if(!/^[AB][1-4]$/.test(code))return;
-        rosters[code]=(sec.students||[]).filter(x=>x&&x.n).map(x=>({name:String(x.n),id:String(x.id||'')}));
+        rosters[code]=(sec.students||[]).filter(x=>x&&x.n).map(x=>({name:String(x.n),id:String(x.id||'')}));sections[code]={course:String(sec.course||''),room:String(sec.room||''),time:String(sec.time||'')};
         if(Array.isArray(sec.groups)&&sec.groups.length>1)groups[code]=sec.groups.map(g=>({s:Number(g.start),e:Number(g.end),grades:g.grades||[]}));
         if(sec.room)rooms[String(sec.room)]=(rooms[String(sec.room)]||0)+1;
       });
-      cfg.rosters=rosters;cfg.groups=groups;
+      cfg.rosters=rosters;cfg.groups=groups;cfg.sections=sections;cfg.teacher.checkedAt=Date.now();
       if(!cfg.teacherName)cfg.teacherName=cfg.teacher.display;
       if(!cfg.room)cfg.room=Object.keys(rooms).sort((a,b)=>rooms[b]-rooms[a])[0]||'';
       save();if(manual)byId('tpTeacherMsg').textContent='Connected as '+cfg.teacher.display+'. Loaded '+Object.values(rosters).reduce((n,arr)=>n+arr.length,0)+' students.';
@@ -351,19 +379,56 @@ function renderWeather(){
   byId('tpWeather').innerHTML='<div class="tp-weather"><div><strong>'+Math.round(weather.temp)+'°F</strong><div class="tp-mini">'+esc(conditions)+' · '+timeLabel(weather.at)+'</div></div><span class="tp-chip">'+Math.round((weather.temp-32)*5/9)+'°C</span></div>';
 }
 function renderCards(sc){
-  byId('tpCardPanel').hidden=!cfg.cardsEnabled;
-  if(!cfg.cardsEnabled)return;
-  const cards=[
-    {title:'Lesson phase',text:sc.classRow?'We are in '+esc(sc.classRow.displayName)+'.':'The next class has not started.'},
-    {title:'Day progress',text:sc.rotation?sc.rotation+' Day · '+(sc.now.getDay()===3?'Wednesday':'Regular')+' schedule.':'No school today.'},
-    {title:'Quick question',text:'What is one thing you understand better today than yesterday?'},
-    {title:'Classroom fact',text:'There are 60 seconds in a minute and 3,600 seconds in an hour.'}
-  ];
-  if(messages.length)cards.push(...messages.slice(0,4).map(m=>({title:'School announcement',text:esc(typeof m==='string'?m:m.text||m.message||'')})));
-  if(weather)cards.push({title:'Orlando weather',text:Math.round(weather.temp)+'°F right now.'});
-  const i=Math.floor(Date.now()/18000)%cards.length;
-  byId('tpCardIndex').textContent=(i+1)+' / '+cards.length;
-  byId('tpCardText').innerHTML='<strong>'+esc(cards[i].title)+'</strong><p>'+cards[i].text+'</p>';
+ const panel=byId('tpCardPanel');panel.hidden=!cfg.cardsEnabled;
+ if(!cfg.cardsEnabled)return;
+ const schoolRows=sc.rows.filter(r=>r.type==='class'&&r.periodNumber);
+ const lessonTime=sc.classRow?Math.max(0,Math.min(1,(sc.seconds-mins(sc.classRow.start)*60)/Math.max(1,(mins(sc.classRow.end)-mins(sc.classRow.start))*60))):0;
+ const dayStart=sc.rows.length?mins(sc.rows[0].start)*60:0;
+ const dayEnd=sc.rows.length?mins(sc.rows[sc.rows.length-1].end)*60:1;
+ const dayPercent=sc.rotation?clamp((sc.seconds-dayStart)/(dayEnd-dayStart)*100,0,100):0;
+ const upcomingDays=Object.entries(window.CALENDAR||{}).filter(([d,v])=>v&&d>=sc.day);
+ const questions=[
+  {q:'What does it mean to support a claim with evidence?',a:'Evidence gives a specific reason or observation that supports the claim.'},
+  {q:'How many seconds are there in a 75-minute class?',a:'75 × 60 = 4,500 seconds.'},
+  {q:'What is one question that would improve today’s lesson?',a:'There are many valid answers. Explain why your question matters.'},
+  {q:'What helps you tell a reliable source from an unreliable one?',a:'Look at evidence, author expertise, publication context and corroboration.'}
+ ];
+ const question=questions[Math.floor(Date.now()/80000)%questions.length];
+ const arc=('<div class="tp-day-arc" style="--arc-progress:'+dayPercent+'%"><div class="tp-day-arc-middle"><strong>'+Math.round(dayPercent)+'%</strong><small>of school day</small></div></div>');
+ const cards=[
+  {title:'Lesson phase',html:'<p class="tp-muted">'+(sc.classRow?'Lesson progress: '+Math.round(lessonTime*100)+'% of '+esc(sc.classRow.displayName):'The next class has not started.')+'</p>'},
+  {title:'Day progress',html:arc+'<div class="tp-mini">'+esc(sc.rotation?sc.rotation+' Day · '+(sc.timeType==='wednesday'?'Wednesday':'Regular')+' schedule':'No classes today')+'</div>'},
+  {title:'Quick question',html:'<p class="tp-muted">'+esc(question.q)+'</p><button class="tp-smallbtn" data-tp-action="revealQuestion">Reveal answer</button><p id="tpQuestionAnswer" class="tp-muted" hidden>'+esc(question.a)+'</p>'},
+  {title:'Classroom fact',html:'<p class="tp-muted">Your school’s calendar alternates A and B days only on designated school days.</p>'}
+ ];
+ if(messages.length)cards.push(...messages.slice(0,4).map(m=>{
+  const text=typeof m==='string'?m:m.text||m.message||m.headline||'';
+  const from=m?.from,to=m?.to;if(from&&sc.day<from||to&&sc.day>to)return null;
+  return {title:'School announcement',html:'<p class="tp-muted">'+esc(text)+'</p>'};
+ }).filter(Boolean));
+ if(weather&&cfg.weatherCards)cards.push({title:'Orlando weather',html:'<p class="tp-muted">'+Math.round(weather.temp)+'°F right now.</p>'});
+ if(cfg.calendarCards&&upcomingDays.length){
+  const remain=upcomingDays.length;
+  cards.push({title:'School calendar',html:'<p class="tp-muted"><strong>'+remain+'</strong> published school days remain through May 26, 2027.</p>'});
+ }
+ const index=Math.floor(Date.now()/(clamp(cfg.cardSeconds,5,120)*1000))%cards.length;
+ const card=cards[index],key=String(index)+'_'+sc.day+'_'+(sc.code||'');
+ byId('tpCardIndex').textContent=(index+1)+' / '+cards.length;
+ if(key!==lastCardId){
+  lastCardId=key;byId('tpCardText').innerHTML='<strong>'+esc(card.title)+'</strong>'+card.html;
+ }else if(index===1){
+  // Update progress continuously without resetting the question's revealed state.
+  const el=byId('tpCardText').querySelector('.tp-day-arc');
+  if(el)el.style.setProperty('--arc-progress',dayPercent+'%');
+ }
+}
+function renderAlerts(){
+ const box=byId('tpAlertsBanner');
+ if(!cfg.alertsEnabled){box.hidden=true;return;}
+ const warnings=messages.filter(x=>x&&typeof x==='object'&&(x.severity||x.event));
+ box.hidden=!warnings.length;
+ if(warnings.length)box.innerHTML=warnings.slice(0,3).map(a=>
+   '<div><strong>'+esc(a.event||'Weather alert')+'</strong> '+esc(a.headline||a.text||'')+'</div>').join('');
 }
 function renderAgenda(sc){
   byId('tpAgendaPanel').hidden=!cfg.agendaEnabled;
@@ -381,7 +446,7 @@ function renderSchedule(sc){
   const target=byId('tpScheduleRows');
   const sig=iso(sc.now)+String(sc.rotation)+sc.rows.map(x=>x.displayName).join('|')+sc.current?.name;
   if(sig===lastTickKey)return;lastTickKey=sig;
-  byId('tpScheduleType').textContent=sc.now.getDay()===3?'Wednesday':'Block day';
+  byId('tpScheduleType').textContent=sc.timeType==='wednesday'?'Wednesday':'Block day';
   target.innerHTML=sc.rotation?sc.rows.map(row=>{
     const current=sc.current===row;
     return '<div class="tp-inline" style="margin:0;padding:7px 9px;border-radius:10px;'+(current?'background:var(--blue-soft)':'')+'">'+
@@ -390,7 +455,7 @@ function renderSchedule(sc){
 }
 function paintLesson(win,sc){
   const track=byId('tpLessonTrack');
-  if(!sc.classRow){track.innerHTML='';byId('tpOpenAt').textContent='';byId('tpCloseAt').textContent='';return;}
+  if(!sc.classRow){track.innerHTML='';byId('tpOpenAt').textContent='';byId('tpCloseAt').textContent='';byId('tpGroups').textContent='';return;}
   const duration=Math.max(1,win.end-win.start),pct=n=>clamp((n-win.start)/duration*100,0,100);
   const closed=[];
   let cursor=win.start;
@@ -400,7 +465,7 @@ function paintLesson(win,sc){
   if(cursor<win.end)closed.push([cursor,win.end]);
   track.innerHTML=closed.map(pair=>'<div class="tp-zone" style="left:'+pct(pair[0])+'%;width:'+(pct(pair[1])-pct(pair[0]))+'%"></div>').join('')+
     '<div class="tp-marker" style="left:'+pct(sc.seconds)+'%"></div>';
-  byId('tpOpenAt').textContent=win.open.length?'Open '+win.open.map(x=>timeLabel(new Date(new Date(sc.now.getFullYear(),sc.now.getMonth(),sc.now.getDate()).getTime()+x[0]*1000))).join(' / '):'No open pass window';
+  byId('tpGroups').textContent=(cfg.groups?.[sc.code]||[]).map(g=>(g.grades||g.g||[]).map(n=>n+'th').join(', ')+' grade').filter(Boolean).join(' / ');byId('tpOpenAt').textContent=win.open.length?'Open '+win.open.map(x=>timeLabel(new Date(new Date(sc.now.getFullYear(),sc.now.getMonth(),sc.now.getDate()).getTime()+x[0]*1000))).join(' / '):'No open pass window';
   byId('tpCloseAt').textContent=win.open.length?'Close '+win.open.map(x=>timeLabel(new Date(new Date(sc.now.getFullYear(),sc.now.getMonth(),sc.now.getDate()).getTime()+x[1]*1000))).join(' / '):'';
 }
 function renderPasses(sc,win){
@@ -410,7 +475,7 @@ function renderPasses(sc,win){
   const allowed=cfg.passEnabled&&(cfg.demo||hasTeacher())&&!!sc.classRow&&total<cfg.slots;
   byId('tpNewPass').disabled=!allowed;
   byId('tpPassHint').textContent=!cfg.passEnabled?'Passes disabled':!hasTeacher()?'Connect a teacher code to enable passes.':!sc.classRow?'No class in progress':total>=cfg.slots?'All passes in use':win.status!=='open'&&!cfg.allowOverride?'10/10 rule: passes are closed':'';
-  const now=Date.now();
+  const now=Date.now();const free=Math.max(0,cfg.slots-total);byId('tpSlotGrid').innerHTML=Array.from({length:Math.min(24,cfg.slots)},(_,i)=>{const p=state.active[i];if(p)return '<button type="button" class="tp-slot is-used" data-tp-action="returnPass" data-pass-id="'+esc(p.id)+'" title="Tap to return '+esc(p.student)+'"><strong>'+esc(p.student)+'</strong><small>'+esc(p.where)+' · '+fmt((now-p.outMs)/1000)+'</small></button>';return '<button type="button" class="tp-slot" data-tp-action="newPass" '+(allowed?'':'disabled')+'><strong>Pass '+(i+1)+'</strong><small>Available</small></button>';}).join('')+(cfg.slots>24?'<span class="tp-mini">'+(cfg.slots-24)+' more slots</span>':'');
   byId('tpPassList').innerHTML=total?state.active.map(p=>{
     const limit=getDestinations().find(d=>d.name===p.where)?.limit||8;
     const elapsed=Math.floor((now-p.outMs)/1000),overdue=elapsed>limit*60;
@@ -436,9 +501,104 @@ function renderTimer(){
   byId('tpTimerToggle').textContent=t.running?'Pause':seconds?'Start':'Set time';
   byId('tpTimerState').textContent=t.running?'Running':t.ended?'Finished':'Paused / ready';
 }
+async function soundStorage() {
+ if(soundDb)return soundDb;
+ soundDb=await new Promise((resolve,reject)=>{
+  if(!window.indexedDB){reject(new Error('IndexedDB not supported'));return;}
+  const r=indexedDB.open('oss-teacher-sounds',1);
+  r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains('sounds'))r.result.createObjectStore('sounds',{keyPath:'id'});};
+  r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);
+ });
+ return soundDb;
+}
+async function soundItems() {
+ const db=await soundStorage();
+ return new Promise((resolve,reject)=>{
+  const req=db.transaction('sounds').objectStore('sounds').getAll();
+  req.onsuccess=()=>resolve(req.result||[]);req.onerror=()=>reject(req.error);
+ });
+}
+async function saveSound(item){
+ const db=await soundStorage();
+ return new Promise((resolve,reject)=>{
+  const tx=db.transaction('sounds','readwrite');tx.objectStore('sounds').put(item);
+  tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);
+ });
+}
+async function removeSound(id) {
+ const db=await soundStorage();
+ return new Promise((resolve,reject)=>{
+  const tx=db.transaction('sounds','readwrite');tx.objectStore('sounds').delete(id);
+  tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);
+ });
+}
+function renderSoundList(){
+ const box=byId('tpSoundLibrary');if(!box)return;
+ const visible=[...soundNames,...(cfg.schoolSounds||[]).map(name=>({id:'school:'+name,name}))];box.innerHTML=visible.length?visible.map(x=>
+  '<div class="tp-inline"><span class="tp-mini">'+esc(x.name)+'</span><div class="tp-row"><button class="tp-smallbtn" data-tp-action="soundPlay" data-sound-id="'+esc(x.id)+'">Test</button><button class="tp-smallbtn" data-tp-action="soundRemove" data-sound-id="'+esc(x.id)+'">Remove</button></div></div>').join('')
+  :'<p class="tp-muted">No custom sounds on this device.</p>';
+}
+function refreshSoundOptions(){
+ const options=[['bell','School bell'],['beep','Short chime'],['none','Off'],...soundNames.map(x=>['custom:'+x.id,x.name]),...(cfg.schoolSounds||[]).map(name=>['school:'+name,name.replace(/\.[^.]+$/,'').replaceAll('_',' ')])];
+ ['tpTimerSound','tpTimerWarningSound','tpNotifySound','tpAttentionSound'].forEach(id=>{
+  const el=byId(id);if(!el)return;const selected=el.value;
+  el.innerHTML=options.map(([v,name])=>'<option value="'+esc(v)+'">'+esc(name)+'</option>').join('');
+  el.value=options.some(x=>x[0]===selected)?selected:'none';
+ });
+ renderSoundList();
+}
+async function loadSounds(){
+ try{soundNames=(await soundItems()).map(x=>({id:x.id,name:x.name}));refreshSoundOptions();
+   byId('tpTimerSound').value=cfg.timerSound;
+   byId('tpTimerWarningSound').value=cfg.timerWarnSound;
+   byId('tpNotifySound').value=cfg.notifySound;byId('tpAttentionSound').value=cfg.attentionSound;
+ }catch(e){console.warn('Classroom sound storage unavailable',e);}
+}
+async function uploadSounds(e){
+ const files=[...(e.target.files||[])];e.target.value='';
+ for(const file of files){
+  if(file.size>5*1024*1024||!/^audio\//.test(file.type)){window.alert('Choose audio files smaller than 5 MB each.');continue;}
+  const id='local_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
+  try{await saveSound({id,name:file.name.slice(0,80),blob:file});soundNames.push({id,name:file.name.slice(0,80)});}
+  catch(err){window.alert('Could not save sound: '+err.message);}
+ }
+ refreshSoundOptions();
+}
+async function refreshSchoolSounds(){
+ try{
+   let names=[];
+   try {
+     const r=await fetch('https://api.github.com/repos/shloksheth/School-Class-Timer/contents/teacher-sounds',{cache:'no-store'});
+     if(r.ok){const j=await r.json();if(Array.isArray(j))names=j.filter(x=>x.type==='file').map(x=>x.name);}
+   }catch(_){}
+   if(!names.length){
+     const r=await fetch('teacher-sounds/index.json',{cache:'no-store'});
+     if(r.ok){const data=await r.json();names=Array.isArray(data)?data:(data.files||[]);}
+   }
+   cfg.schoolSounds=names.map(String).filter(n=>/^[\w. ()-]+\.(mp3|wav|ogg|m4a|aac)$/i.test(n));
+   save();refreshSoundOptions();
+   byId('tpSettingsNotice').textContent=cfg.schoolSounds.length+' school sounds available.';
+ }catch(_){byId('tpSettingsNotice').textContent='Could not load the sounds folder. Custom sounds remain available offline.';}
+}
+async function syncTime(){
+ const urls=[cfg.timeServer,'https://timeapi.io/api/Time/current/zone?timeZone=UTC'].filter(Boolean);
+ byId('tpSyncStatus').textContent='Synchronizing...';
+ for(const url of urls){
+  if(!/^https:\/\//i.test(url))continue;
+  try{
+   const r=await fetch(url,{cache:'no-store'});if(!r.ok)continue;
+   const d=await r.json();
+   const s=typeof d.unixtime==='number'?d.unixtime*1000:Date.parse(d.utc_datetime||d.dateTime||d.datetime||'');
+   if(!Number.isFinite(s))continue;
+   cfg.timeOffsetMs=Math.round(s-Date.now());save();
+   byId('tpSyncStatus').textContent='Synced. Device correction '+cfg.timeOffsetMs+' ms.';tick();return;
+  }catch(_){}
+ }
+ byId('tpSyncStatus').textContent='Network time unavailable. Using device time.';
+}
 function playSound(which){
   if(!which||which==='none')return;
-  if(which==='bell'){
+  if(String(which).startsWith('school:')){const name=String(which).slice(7);if(!/^[\w. ()-]+\.(mp3|wav|ogg|m4a|aac)$/i.test(name))return;const a=new Audio('teacher-sounds/'+encodeURIComponent(name));a.volume=clamp(cfg.timerVolume,0,100)/100;a.play().catch(()=>{});return;}if(String(which).startsWith('custom:')){const id=String(which).slice(7);soundItems().then(items=>{const item=items.find(x=>x.id===id);if(!item)return;const old=soundBlobCache.get(id);if(old)URL.revokeObjectURL(old);const url=URL.createObjectURL(item.blob);soundBlobCache.set(id,url);const a=new Audio(url);a.volume=clamp(cfg.timerVolume,0,100)/100;a.play().catch(()=>{});}).catch(()=>{});return;}if(which==='bell'){
     const audio=byId('bellAudio');
     if(audio){audio.pause();audio.currentTime=0;audio.volume=clamp(cfg.timerVolume,0,100)/100;audio.play().catch(()=>{});}return;
   }
@@ -454,28 +614,57 @@ function playSound(which){
     osc.connect(gain);gain.connect(ctx.destination);osc.start();osc.stop(ctx.currentTime+.3);
   }catch(_){}
 }
+function demoJump(kind,quiet=false){
+ const calendar=window.CALENDAR||{};
+ const today=iso(nowDate());
+ const available=Object.entries(calendar).filter(([,v])=>!!v).map(([date])=>date).sort();
+ const day=kind==='next'?available.find(d=>d>today):(calendar[today]?today:available.find(d=>d>=today))||available[0];
+ if(!day)return;
+ const [y,m,d]=day.split('-').map(Number),base=new Date(y,m-1,d);
+ const info=calendar[day],band=cfg.gradeBand==='912'?'912':'1011';
+ const rows=window.SCHEDULE_TABLES?.[band]?.[info?.includes('Wednesday')?'wednesday':'regular']?.rows||[];
+ const first=rows.find(r=>r.type==='class'&&/^Period/.test(r.label));
+ if(!first)return;
+ let seconds=mins(first.start)*60;
+ if(kind==='open'||kind==='next')seconds+=cfg.useRule?cfg.startClose*60+30:120;
+ if(kind==='late')seconds=mins(first.end)*60-(cfg.useRule?cfg.endClose*60:60)+30;
+ if(kind==='closed')seconds+=30;
+ cfg.demoAnchorMs=base.getTime()+seconds*1000;cfg.demoStarted=Date.now();
+ save();lastTickKey='';lastCardId='';
+ if(!quiet)tick();
+}
 function tick(){
  if(role!=='teacher')return;
- const sc=schedule(),win=windowState(sc);
+ const sc=schedule(),win=windowState(sc);byId('tpDemoPanel').hidden=!cfg.demo;byId('tpDemoTime').textContent=cfg.demo?sc.now.toLocaleTimeString([],{hour:'numeric',minute:'2-digit',second:'2-digit'})+' · '+Number(cfg.demoSpeed||1)+'× speed':'';
  const title=cfg.teacherName||(cfg.teacher?.display)||'Classroom dashboard';
  byId('tpRoomTitle').textContent=title;
  byId('tpSubTitle').textContent=(cfg.room?'Room '+cfg.room+' · ':'')+'Classroom tools & hall passes';
  byId('tpDate').textContent=sc.now.toLocaleDateString([],{weekday:'long',month:'long',day:'numeric'});
  byId('tpRotation').textContent=sc.rotation?sc.rotation+' Day':'No school';
- byId('tpRealTime').textContent=sc.now.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
+ byId('tpRealTime').textContent=sc.now.toLocaleTimeString([],{hour:'numeric',minute:'2-digit',hour12:!cfg.hour24});
  byId('tpPeriod').textContent=sc.classRow?sc.classRow.displayName:(sc.current?sc.current.displayName:sc.rotation?'Between classes':'No classes today');
- byId('tpPeriodMeta').textContent=sc.classRow?(sc.code+' · '+sc.classRow.start+'–'+sc.classRow.end):sc.next?'Next: '+sc.next.displayName+' at '+sc.next.start:'Orlando Science';
+ byId('tpPeriodMeta').textContent=sc.classRow?(sc.code+(sc.classRow.room?' · Room '+sc.classRow.room:'')+' · '+sc.classRow.start+'–'+sc.classRow.end):sc.next?'Next: '+sc.next.displayName+' at '+sc.next.start:'Orlando Science';
  byId('tpStatus').dataset.status=win.status;
  byId('tpStatus').textContent=win.status==='between'?'School schedule':win.reason;
  const nextAt=sc.current?mins(sc.current.end)*60:sc.next?mins(sc.next.start)*60:0;
  const duration=win.status!=='between'?win.remain:nextAt?nextAt-sc.seconds:0;
- byId('tpCountdown').textContent=duration?fmt(duration):'--:--';
- byId('tpCountdownLabel').textContent=win.status==='open'?'Until passes close':win.status==='closed'?'Until passes open or class ends':sc.next?'Until '+sc.next.displayName:'No active school period';
- paintLesson(win,sc);renderPasses(sc,win);renderTimer();renderSchedule(sc);renderAgenda(sc);renderCards(sc);renderWeather();
+ byId('tpCountdown').textContent=duration?fmt(cfg.countdownPassed&&sc.current?Math.max(0,sc.seconds-mins(sc.current.start)*60):duration):'--:--';
+ byId('tpCountdownLabel').textContent=cfg.countdownPassed&&sc.current?'Time passed this block':win.status==='open'?'Until passes close':win.status==='closed'?'Until passes open or class ends':sc.next?'Until '+sc.next.displayName:'No active school period';
+ paintLesson(win,sc);renderPasses(sc,win);renderTimer();renderSchedule(sc);renderAgenda(sc);renderCards(sc);renderAlerts();renderWeather();
  if(cfg.notificationsEnabled&&sc.classRow){
-   const rem=mins(sc.classRow.end)*60-sc.seconds,key=iso(sc.now)+sc.code;
-   if(rem>0&&rem<=cfg.notifyMin*60&&lastNotify!==key){lastNotify=key;playSound(cfg.notifySound);}
- }
+   const remaining=mins(sc.classRow.end)*60-sc.seconds,code=iso(sc.now)+sc.code;
+   if(previousBellCode===code&&previousBellRemain!==null){
+    const thresholds=[cfg.notify15?900:0,cfg.notify10?600:0,cfg.notify5?300:0,cfg.notifyMin*60,cfg.ringAtEnd?0:-1]
+      .filter(x=>x>=0).sort((a,b)=>b-a);
+    for(const threshold of thresholds){
+      if(previousBellRemain>threshold&&remaining<=threshold){
+       playSound(threshold===0?'bell':cfg.notifySound);
+       break;
+      }
+    }
+   }
+   previousBellCode=code;previousBellRemain=remaining;
+ }else{previousBellCode='';previousBellRemain=null;}
  updateWeather();updateMessages();
  if(sc.now.getSeconds()===0&&sc.now.getMinutes()%5===0){flushQueue();if(cfg.code&&!cfg.demo&&(!cfg.teacher?.checkedAt||Date.now()-cfg.teacher.checkedAt>300000))verifyTeacher(false);}
  document.title=sc.rotation?sc.rotation+' Day · Teacher Mode':'Teacher Mode · Orlando Science';
@@ -485,13 +674,25 @@ function openPick(){
  if(!hasTeacher()||!sc.classRow||state.active.length>=cfg.slots)return;
  if(win.status!=='open'&&!cfg.allowOverride){window.alert('Hall passes are closed during the first and last '+cfg.startClose+'/'+cfg.endClose+' minutes.');return;}
  chooserPeriod=sc.code;choosing=true;
- const students=sectionStudents(chooserPeriod).filter(x=>!state.active.some(p=>p.studentId===x.id&&p.studentId||p.student===x.name));
+ const students=sectionStudents(chooserPeriod).filter(x=>!state.active.some(p=>(p.studentId&&p.studentId===x.id)||p.student===x.name));pickerCandidates=students;pickerLetter='';byId('tpStudentSearch').value='';
  const select=byId('tpStudent');
- select.innerHTML='<option value="">Select a student</option>'+students.map((s,i)=>'<option value="'+i+'">'+esc(s.name)+'</option>').join('')+'<option value="__guest">Guest / visiting student</option>';
+ renderStudentChoices();
  select._students=students;byId('tpGuestWrap').hidden=true;byId('tpGuestName').value='';
  byId('tpDestination').innerHTML=getDestinations().map(d=>'<option value="'+esc(d.name)+'">'+esc(d.name)+' ('+d.limit+' min)</option>').join('');
  byId('tpPickWarning').textContent=win.status==='closed'?'Passes are currently closed. You will need to confirm an override.':'Passes are open for this class.';
  byId('tpPick').hidden=false;
+}
+function renderStudentChoices(){
+ const search=val('tpStudentSearch').trim().toLowerCase();
+ const students=pickerCandidates.filter(s=>(!pickerLetter||s.name.charAt(0).toUpperCase()===pickerLetter)&&(!search||s.name.toLowerCase().includes(search)));
+ const letters=Array.from(new Set(pickerCandidates.map(s=>s.name.charAt(0).toUpperCase()))).sort();
+ byId('tpStudentLetters').innerHTML='<button class="tp-smallbtn'+(!pickerLetter?' active':'')+'" data-tp-action="studentLetter" data-letter="">All</button>'+
+ letters.map(x=>'<button class="tp-smallbtn'+(pickerLetter===x?' active':'')+'" data-tp-action="studentLetter" data-letter="'+esc(x)+'">'+esc(x)+'</button>').join('');
+ const select=byId('tpStudent');
+ select.innerHTML='<option value="">Select a student ('+students.length+')</option>'+
+ students.map((st,i)=>'<option value="'+i+'">'+esc(st.name)+'</option>').join('')+
+ '<option value="__guest">Guest / visiting student</option>';
+ select._students=students;byId('tpGuestWrap').hidden=true;
 }
 function closePick(){if(pendingLeave){clearTimeout(pendingLeave.timer);pendingLeave=null;}byId('tpPick').hidden=true;choosing=false;}
 function finishStart(student,where,outside,code){
@@ -526,7 +727,7 @@ function confirmPass(){
 function completePass(id,status){
  const index=state.active.findIndex(x=>x.id===id);if(index<0)return;
  const p=state.active[index],now=Date.now();
- if(status==='Cancelled'&&now-p.outMs>30000&&cfg.pinHash){
+ if(status==='Cancelled'&&now-p.outMs>30000&&!cfg.pinHash&&!window.confirm('Cancel this pass? The cancelled trip stays in the log.'))return;if(status==='Cancelled'&&now-p.outMs>30000&&cfg.pinHash){
    const pin=window.prompt('Enter settings PIN to cancel this older trip:');
    if(pin===null)return;
    checkPin(pin).then(ok=>{if(ok)completePassConfirmed(id,status);else window.alert('Incorrect PIN.');});return;
@@ -543,7 +744,7 @@ function completePassConfirmed(id,status){
  state.recent.unshift(trip);state.recent=state.recent.slice(0,100);
  if(!cfg.demo&&p.teacher&&p.teacher!=='DEMO'){
    const payload={i:stamp(p.outMs,back),s:p.studentId||'',sec:p.section,blk:p.section,w:p.where,
-     to:String(p.outMs),ti:String(back),o:p.outside?'1':'',m:'LIVE',b:cfg.boardId,st:status,g:p.guest?p.student:''};
+     to:String(p.outMs),ti:String(back),o:p.outside?'1':'',m:cfg.testMode?'TEST':'LIVE',b:cfg.boardId,st:status,g:p.guest?p.student:''};
    state.queue.push({id:p.id,teacher:p.teacher,payload});
  }
  save();tick();flushQueue();
@@ -563,7 +764,7 @@ function toggleTimer(){
  save();renderTimer();
 }
 function openTimerDialog(){
- const sec=timerValue();byId('tpTimerMinutes').value=Math.floor(sec/60);byId('tpTimerSeconds').value=sec%60;
+ const sec=timerValue();byId('tpTimerMinutes').value=Math.floor(sec/60);byId('tpTimerSeconds').value=sec%60;timerDigits='';byId('tpTimerRecent').innerHTML=(state.timer.recent||[]).map(sec=>'<button class="tp-smallbtn" data-tp-action="timerRecent" data-sec="'+sec+'">'+fmt(sec)+'</button>').join('');
  byId('tpTimerDialog').hidden=false;
 }
 function timerFromDialog(start){setTimer(clamp(val('tpTimerMinutes'),0,999)*60+clamp(val('tpTimerSeconds'),0,59),start);byId('tpTimerDialog').hidden=true;}
@@ -583,20 +784,20 @@ function onClick(ev){
  if(act==='openTeacherSettings')return openSettings('connect');
  if(act==='closeTeacherSettings')return closeSettings();
  if(act==='saveTeacherSettings')return saveTeacherSettings();
- if(act==='saveAgenda')return saveAgenda();
+ if(act==='saveAgenda')return saveAgenda();if(act==='copyAgenda')return copyAgenda();
  if(act==='connectTeacher'){saveTeacherSettings();return verifyTeacher(true);}
  if(act==='disconnectTeacher'){
    if(!window.confirm('Disconnect teacher account and clear cached student names from this device?'))return;
-   cfg.code='';cfg.teacher=null;cfg.rosters={};cfg.groups={};save();byId('tpCodeInput').value='';byId('tpTeacherMsg').textContent='Disconnected. Old waiting logs remain associated with their original teacher.';tick();return;
+   cfg.code='';cfg.teacher=null;cfg.rosters={};cfg.groups={};cfg.sections={};save();byId('tpCodeInput').value='';byId('tpTeacherMsg').textContent='Disconnected. Old waiting logs remain associated with their original teacher.';tick();return;
  }
  if(act==='setPin')return setPin();
  if(act==='removePin'){cfg.pinHash='';cfg.pinSalt='';save();byId('tpSettingsNotice').textContent='PIN removed.';return;}
  if(act==='resetDrift'){cfg.shiftSec=0;cfg.driftDaily=0;cfg.driftAt=Date.now();byId('tpShift').value=0;byId('tpDrift').value=0;save();return;}
  if(act==='flushQueue')return flushQueue();
- if(act==='exportTrips')return exportTrips();
- if(act==='testTeacherSound')return playSound(val('tpTimerSound'));
+ if(act==='exportTrips')return exportTrips();if(act==='toggleFullscreen'){if(document.fullscreenElement)document.exitFullscreen?.();else byId('glassRoot').requestFullscreen?.();return;}if(act==='saveOverride'){const d=val('tpOverrideDate'),o=val('tpOverrideType');if(!/^\d{4}-\d\d-\d\d$/.test(d))return;cfg.calendarOverrides=cfg.calendarOverrides||{};if(o)cfg.calendarOverrides[d]=o;else delete cfg.calendarOverrides[d];save();lastTickKey='';byId('tpSettingsNotice').textContent='Calendar override saved for '+d;tick();return;}
+ if(act==='testTeacherSound')return playSound(val('tpTimerSound'));if(act==='soundPlay')return playSound(btn.dataset.soundId.startsWith('school:')?btn.dataset.soundId:'custom:'+btn.dataset.soundId);if(act==='soundRemove'){const id=btn.dataset.soundId;if(id.startsWith('school:')){cfg.schoolSounds=(cfg.schoolSounds||[]).filter(n=>'school:'+n!==id);save();refreshSoundOptions();return;}return removeSound(id).then(()=>{soundNames=soundNames.filter(x=>x.id!==id);refreshSoundOptions();});}if(act==='refreshSchoolSounds')return refreshSchoolSounds();if(act==='attentionSignal')return playSound(cfg.attentionSound);if(act==='demoJumpClosed')return demoJump('closed');if(act==='demoJumpOpen')return demoJump('open');if(act==='demoJumpLate')return demoJump('late');if(act==='demoJumpNext')return demoJump('next');if(act==='demoSpeedToggle'){if(!cfg.demo)return;const at=nowDate().getTime();cfg.demoSpeed=cfg.demoSpeed===1?10:cfg.demoSpeed===10?30:cfg.demoSpeed===30?60:1;cfg.demoAnchorMs=at-Number(cfg.shiftSec||0)*1000;cfg.demoStarted=Date.now();save();tick();return;}if(act==='revealQuestion'){const target=byId('tpQuestionAnswer');if(target)target.hidden=!target.hidden;return;}if(act==='syncTime')return syncTime();
  if(act==='shiftMinus'||act==='shiftPlus'){cfg.shiftSec=clamp(Number(cfg.shiftSec)+(act==='shiftPlus'?1:-1),-600,600);save();tick();return;}
- if(act==='newPass')return openPick();
+ if(act==='newPass')return openPick();if(act==='studentLetter'){pickerLetter=btn.dataset.letter||'';byId('tpStudentSearch').value='';renderStudentChoices();return;}
  if(act==='closePick')return closePick();
  if(act==='confirmPass')return confirmPass();
  if(act==='returnPass')return completePass(btn.dataset.passId,'Returned');
@@ -607,7 +808,7 @@ function onClick(ev){
  if(act==='timerPreset')return setTimer(Number(btn.dataset.min)*60,false);
  if(act==='timerEdit')return openTimerDialog();
  if(act==='timerDialogClose'){byId('tpTimerDialog').hidden=true;return;}
- if(act==='timerAdjust'){const s=clamp(val('tpTimerMinutes'),0,999)*60+clamp(val('tpTimerSeconds'),0,59)+Number(btn.dataset.sec);byId('tpTimerMinutes').value=Math.floor(Math.max(0,s)/60);byId('tpTimerSeconds').value=Math.max(0,s)%60;return;}
+ if(act==='timerKey'){const digit=btn.dataset.key;if(digit==='⌫')timerDigits=timerDigits.slice(0,-1);else timerDigits=(timerDigits+digit).slice(-4);const padded=timerDigits.padStart(4,'0'),sec=Number(padded.slice(0,2))*60+Number(padded.slice(2));byId('tpTimerMinutes').value=Math.floor(sec/60);byId('tpTimerSeconds').value=sec%60;return;}if(act==='timerRecent'){const n=Number(btn.dataset.sec);byId('tpTimerMinutes').value=Math.floor(n/60);byId('tpTimerSeconds').value=n%60;timerDigits='';return;}if(act==='timerAdjust'){timerDigits='';const s=clamp(val('tpTimerMinutes'),0,999)*60+clamp(val('tpTimerSeconds'),0,59)+Number(btn.dataset.sec);byId('tpTimerMinutes').value=Math.floor(Math.max(0,s)/60);byId('tpTimerSeconds').value=Math.max(0,s)%60;return;}
  if(act==='timerSet'||act==='timerSetStart')return timerFromDialog(act==='timerSetStart');
 }
 attach();

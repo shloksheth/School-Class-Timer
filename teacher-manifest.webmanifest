@@ -1,0 +1,18 @@
+{
+  "name": "Orlando Science Class Timer",
+  "short_name": "Class Timer",
+  "description": "Student bell schedule and teacher classroom tools",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0b1425",
+  "theme_color": "#17283d",
+  "icons": [
+    {
+      "src": "teacher-app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -110,3 +110,12 @@ html[data-app-role="teacher"] #grade,html[data-app-role="teacher"] #bellToggle{d
 .tp-letters{display:flex;flex-wrap:wrap;gap:5px;margin:10px 0}
 .tp-letters button{min-width:32px;padding:7px}
 .tp-calendar-tag{border:1px solid var(--line);border-radius:999px;padding:5px 10px;font-size:9px;font-weight:700;color:var(--muted)}
+
+.tp-slot-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-top:17px}
+.tp-slot{min-height:75px;border:1px solid var(--line-strong);border-radius:14px;background:var(--panel-soft);color:var(--ink);text-align:left;padding:12px;display:flex;flex-direction:column;align-items:start;justify-content:center;gap:5px}
+.tp-slot:hover:not(:disabled){border-color:var(--blue);background:var(--blue-soft)}
+.tp-slot.is-used{background:rgba(45,165,132,.11);border-color:rgba(45,165,132,.22)}
+.tp-slot strong{font-size:11px;font-weight:800;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tp-slot small{font-size:9px;color:var(--muted)}
+.tp-slot:disabled{opacity:.45}
+.tp-timer-pad button{font-variant-numeric:tabular-nums}

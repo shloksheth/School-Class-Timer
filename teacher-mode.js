@@ -10,13 +10,13 @@ const CFG_KEY = 'oss-teacher-config-v1';
 const STATE_KEY = 'oss-teacher-state-v1';
 const SCHOOL_URL = 'https://script.google.com/macros/s/AKfycbyK0y5PNq5rJfvAAVGyctWzQhSYwjvACE3muXEAojeoQZYqvBlAdE_XXXrCC3i77kO5HA/exec';
 const defaults = {
-  teacherName:'',room:'',url:SCHOOL_URL,code:'',teacher:null,rosters:{},groups:{},sections:{},gradeBand:'1011',calendarOverrides:{},hour24:false,countdownPassed:false,fullScreen:false,demoSpeed:1,
+  teacherName:'',room:'',url:SCHOOL_URL,code:'',teacher:null,rosters:{},groups:{},sections:{},gradeBand:'1011',calendarOverrides:{},hour24:false,countdownPassed:false,fullScreen:false,demoSpeed:1,timeServer:'',timeOffsetMs:0,schoolSounds:[],
   startClose:10,endClose:10,useRule:true,allowOverride:false,slots:2,autoLeave:5,
   destinations:'Restroom:8\nLocker:3\nWater:3\nOffice:8\nNurse:8\nOther:8',
   timerEnabled:true,timerWarn:60,timerSound:'bell',timerWarnSound:'beep',timerVolume:35,
   agendaEnabled:true,agendaDaily:false,agendaLead:5,agenda:{},
   weatherEnabled:false,cardsEnabled:false,cardSeconds:20,calendarCards:true,weatherCards:false,alertsEnabled:false,messagesEnabled:false,
-  notificationsEnabled:false,notifyMin:5,notifySound:'bell',passEnabled:true,
+  notificationsEnabled:false,notifyMin:5,notify15:false,notify10:false,notify5:false,ringAtEnd:false,attentionSound:'beep',notifySound:'bell',passEnabled:true,
   demo:false,testMode:false,shiftSec:0,driftDaily:0,driftAt:Date.now(),pinHash:'',pinSalt:'',
   boardId:'board-'+Math.random().toString(36).slice(2,8)
 };
@@ -33,7 +33,7 @@ if(!Array.isArray(state.recent))state.recent=[];
 let role=localStorage.getItem(KEY);
 if(role!=='student'&&role!=='teacher')role=null;
 let weather=null,messages=[],lastWx=0,lastMsg=0,lastNotify='',requestCount=0,flushing=false;
-let choosing=false,chooserPeriod='',pendingLeave=null,lastTickKey='',activePane='connect';
+let choosing=false,chooserPeriod='',pendingLeave=null,lastTickKey='',activePane='connect',previousBellRemain=null,previousBellCode='';
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const val=id=>byId(id)?.value||'';
 const checked=id=>!!byId(id)?.checked;
@@ -43,7 +43,7 @@ const timeLabel=n=>new Date(n).toLocaleTimeString([],{hour:'numeric',minute:'2-d
 const secDay=d=>d.getHours()*3600+d.getMinutes()*60+d.getSeconds();
 const mins=s=>{const p=String(s||'0:00').split(':').map(Number);return p[0]*60+p[1];};
 const save=()=>{localStorage.setItem(CFG_KEY,JSON.stringify(cfg));localStorage.setItem(STATE_KEY,JSON.stringify(state));};
-const nowDate=()=>new Date(Date.now()+Number(cfg.shiftSec||0)*1000+Number(cfg.driftDaily||0)*((Date.now()-(cfg.driftAt||Date.now()))/86400000)*1000+(cfg.demo?Math.max(0,Date.now()-(cfg.demoStarted||Date.now()))*(Number(cfg.demoSpeed||1)-1):0));
+const nowDate=()=>new Date(Date.now()+Number(cfg.shiftSec||0)*1000+Number(cfg.driftDaily||0)*((Date.now()-(cfg.driftAt||Date.now()))/86400000)*1000+Number(cfg.timeOffsetMs||0)+(cfg.demo?Math.max(0,Date.now()-(cfg.demoStarted||Date.now()))*(Number(cfg.demoSpeed||1)-1):0));
 let soundNames=[],soundDb=null;const soundBlobCache=new Map();
 const iso=d=>[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');
 const sectionCode=(row,rotation)=>{
@@ -100,7 +100,7 @@ function hasTeacher(){return Boolean(cfg.demo||(cfg.teacher&&cfg.teacher.ok===tr
 function panelHTML(){
   return '<main class="content-shell" id="teacherDashboard" hidden>'+
     '<div class="tp-toolbar"><div><div class="tp-kicker">Teacher mode</div><h1 id="tpRoomTitle">Classroom dashboard</h1><p id="tpSubTitle">Hall passes, lesson timing and classroom tools</p></div>'+
-    '<div class="tp-actions"><button class="liquid-btn" data-tp-action="changeMode">Change mode</button><button class="liquid-btn primary-action" data-tp-action="openTeacherSettings">Teacher settings</button></div></div>'+
+    '<div class="tp-actions"><button class="liquid-btn" data-tp-action="attentionSignal">Attention</button><button class="liquid-btn" data-tp-action="changeMode">Change mode</button><button class="liquid-btn primary-action" data-tp-action="openTeacherSettings">Teacher settings</button></div></div>'+
     '<div class="tp-grid"><div>'+
       '<section class="tp-panel"><div class="tp-panel-head"><span class="tp-status" id="tpStatus" data-status="between">School schedule</span><span class="tp-mini" id="tpDate"></span></div>'+
         '<div class="tp-headline" id="tpPeriod">Loading...</div><div class="tp-muted" id="tpPeriodMeta"></div>'+
@@ -158,10 +158,10 @@ function teacherSettingsHTML() {
   '<div class="tp-field"><label>Sound volume (%)</label><input id="tpTimerVolume" type="number" min="0" max="100"></div>'+
   '<div class="tp-field"><label>Timer end sound</label><select id="tpTimerSound"><option value="bell">School bell</option><option value="beep">Short chime</option><option value="none">Off</option></select></div>'+
   '<div class="tp-field"><label>Timer warning sound</label><select id="tpTimerWarningSound"><option value="beep">Short chime</option><option value="bell">School bell</option><option value="none">Off</option></select></div>'+
-  '<div class="tp-field full"><label><input type="checkbox" id="tpNotifications">Bell countdown notifications</label></div>'+
+  '<div class="tp-field full"><label><input type="checkbox" id="tpNotifications">Bell countdown notifications</label></div><div class="tp-field full tp-row"><label><input type="checkbox" id="tpNotify15">15 minutes</label><label><input type="checkbox" id="tpNotify10">10 minutes</label><label><input type="checkbox" id="tpNotify5">5 minutes</label></div><div class="tp-field full"><label><input type="checkbox" id="tpRingAtEnd">Ring bell at class end</label></div>'+
   '<div class="tp-field"><label>Alert before class ends (min)</label><input id="tpNotifyMin" type="number" min="1" max="30"></div>'+
   '<div class="tp-field"><label>Bell notification sound</label><select id="tpNotifySound"><option value="bell">School bell</option><option value="beep">Short chime</option><option value="none">Off</option></select></div>'+
-  '<div class="tp-field full"><button class="liquid-btn" type="button" data-tp-action="testTeacherSound">Test selected end sound</button></div><div class="tp-field full"><h3>Sound library</h3><p class="tp-muted">Add your own short audio files. Each sound can be selected independently for timer end, warning, and bell notification. Files are stored on this device for offline use.</p><input type="file" accept="audio/mpeg,audio/mp3,audio/wav,audio/ogg,audio/mp4,audio/aac" id="tpSoundUpload" multiple aria-label="Upload classroom sounds"><div id="tpSoundLibrary" class="tp-stack"></div></div>'+
+  '<div class="tp-field full"><button class="liquid-btn" type="button" data-tp-action="testTeacherSound">Test selected end sound</button></div><div class="tp-field full"><label>Attention signal</label><select id="tpAttentionSound"><option value="beep">Short chime</option><option value="bell">School bell</option><option value="none">Off</option></select></div><div class="tp-field full"><h3>Sound library</h3><p class="tp-muted">Add your own short audio files. Each sound can be selected independently for timer end, warning, and bell notification. Files are stored on this device for offline use.</p><input type="file" accept="audio/mpeg,audio/mp3,audio/wav,audio/ogg,audio/mp4,audio/aac" id="tpSoundUpload" multiple aria-label="Upload classroom sounds"><div class="tp-row" style="margin-top:8px"><button class="liquid-btn" type="button" data-tp-action="refreshSchoolSounds">Find school sounds in GitHub folder</button></div><div id="tpSoundLibrary" class="tp-stack"></div></div>'+
   '</div></section>'+
   '<section class="tp-pane" id="tpPane-agenda" hidden><div class="tp-form">'+
   '<div class="tp-field full"><label><input type="checkbox" id="tpAgendaEnabled">Display lesson agenda</label></div>'+
@@ -183,10 +183,11 @@ function teacherSettingsHTML() {
   '<div class="tp-field full"><button class="liquid-btn" type="button" data-tp-action="resetDrift">The school bell was reset</button></div>'+
   '<div class="tp-field full"><label>Settings PIN (optional, 4 to 12 digits)</label><input type="password" id="tpPinNew" inputmode="numeric" maxlength="12" autocomplete="off" placeholder="Leave blank to keep current PIN"></div>'+
   '<div class="tp-field full"><div class="tp-row"><button class="liquid-btn" type="button" data-tp-action="setPin">Set or replace PIN</button><button class="liquid-btn" type="button" data-tp-action="removePin">Remove PIN</button></div></div>'+
-  '<div class="tp-field full"><label>School day override (only this board)</label></div><div class="tp-field"><label>Date</label><input type="date" id="tpOverrideDate"></div><div class="tp-field"><label>Set day to</label><select id="tpOverrideType"><option value="">School calendar default</option><option value="noschool">No school</option><option value="A_regular">A Day Regular</option><option value="B_regular">B Day Regular</option><option value="A_wednesday">A Day Wednesday</option><option value="B_wednesday">B Day Wednesday</option></select></div><div class="tp-field full"><button class="liquid-btn" type="button" data-tp-action="saveOverride">Save calendar override</button></div><div class="tp-field full"><label><input type="checkbox" id="tpCountdownPassed">Show time passed rather than remaining</label></div><div class="tp-field"><label>Demo clock speed</label><select id="tpDemoSpeed"><option value="1">Normal</option><option value="10">10× speed</option><option value="30">30× speed</option><option value="60">60× speed</option></select></div><div class="tp-field full"><button class="liquid-btn" type="button" data-tp-action="flushQueue">Retry waiting logs</button> <span class="tp-mini" id="tpQueueCount"></span></div>'+
+  '<div class="tp-field full"><label>School day override (only this board)</label></div><div class="tp-field"><label>Date</label><input type="date" id="tpOverrideDate"></div><div class="tp-field"><label>Set day to</label><select id="tpOverrideType"><option value="">School calendar default</option><option value="noschool">No school</option><option value="A_regular">A Day Regular</option><option value="B_regular">B Day Regular</option><option value="A_wednesday">A Day Wednesday</option><option value="B_wednesday">B Day Wednesday</option></select></div><div class="tp-field full"><button class="liquid-btn" type="button" data-tp-action="saveOverride">Save calendar override</button></div><div class="tp-field full"><label><input type="checkbox" id="tpCountdownPassed">Show time passed rather than remaining</label></div><div class="tp-field"><label>Demo clock speed</label><select id="tpDemoSpeed"><option value="1">Normal</option><option value="10">10× speed</option><option value="30">30× speed</option><option value="60">60× speed</option></select></div><div class="tp-field full"><label>Local time synchronization URL (optional, UTC JSON)</label><input type="url" id="tpTimeServer" placeholder="https://..."></div><div class="tp-field full"><button class="liquid-btn" type="button" data-tp-action="syncTime">Sync clock with time server</button> <span class="tp-mini" id="tpSyncStatus"></span></div><div class="tp-field full"><button class="liquid-btn" type="button" data-tp-action="flushQueue">Retry waiting logs</button> <span class="tp-mini" id="tpQueueCount"></span></div>'+
   '<div class="tp-field full"><button class="liquid-btn" type="button" data-tp-action="exportTrips">Export recent passes (CSV)</button></div>'+
   '<div class="tp-field full"><p class="tp-muted">Teacher codes and student rosters are stored locally on this device for offline use. Use Disconnect on a shared device to clear them. PIN is a local classroom deterrent, not a substitute for a secured school device.</p></div>'+
   '</div></section>'+
+  '<div class="tp-note-credit">Hall Pass Board features and original school schedule data by Shamil Ganiev, 2026. Free School Use License. <a href="HALLPASS-LICENSE.md" target="_blank" rel="noopener">License and permitted use</a>. <a href="HALLPASS-THIRD-PARTY-NOTICES.md" target="_blank" rel="noopener">Third-party notices</a>. Weather from Open-Meteo and the National Weather Service.</div>'+
   '<div class="tp-foot"><span class="tp-mini" id="tpSettingsNotice"></span><button class="liquid-btn primary-action" data-tp-action="saveTeacherSettings">Save changes</button></div>'+
   '</div></div></section></div>';
 }
@@ -246,13 +247,13 @@ async function openSettings(pane){
   byId('tpCodeInput').value=cfg.code||'';byId('tpUrlInput').value=cfg.url||SCHOOL_URL;
   const values={tpTeacherName:cfg.teacherName,tpRoomInput:cfg.room,tpCloseStart:cfg.startClose,tpCloseEnd:cfg.endClose,tpSlots:cfg.slots,tpAutoLeave:cfg.autoLeave,
     tpDestinations:cfg.destinations,tpTimerWarn:cfg.timerWarn,tpTimerSound:cfg.timerSound,tpTimerWarningSound:cfg.timerWarnSound,
-    tpTimerVolume:cfg.timerVolume,tpNotifyMin:cfg.notifyMin,tpNotifySound:cfg.notifySound,tpAgendaLead:cfg.agendaLead,tpShift:cfg.shiftSec,tpDrift:cfg.driftDaily,tpCardSeconds:cfg.cardSeconds};
+    tpTimerVolume:cfg.timerVolume,tpNotifyMin:cfg.notifyMin,tpNotifySound:cfg.notifySound,tpAgendaLead:cfg.agendaLead,tpShift:cfg.shiftSec,tpDrift:cfg.driftDaily,tpCardSeconds:cfg.cardSeconds,tpTimeServer:cfg.timeServer||''};
   Object.entries(values).forEach(([k,v])=>{if(byId(k))byId(k).value=v;});
   const toggles={tpRuleEnabled:cfg.useRule,tpAllowOverride:cfg.allowOverride,tpPassEnabled:cfg.passEnabled,tpDemo:cfg.demo,tpTestMode:cfg.testMode,
-    tpTimerEnabled:cfg.timerEnabled,tpNotifications:cfg.notificationsEnabled,tpAgendaEnabled:cfg.agendaEnabled,tpAgendaDaily:cfg.agendaDaily,
+    tpTimerEnabled:cfg.timerEnabled,tpNotifications:cfg.notificationsEnabled,tpNotify15:cfg.notify15,tpNotify10:cfg.notify10,tpNotify5:cfg.notify5,tpRingAtEnd:cfg.ringAtEnd,tpAgendaEnabled:cfg.agendaEnabled,tpAgendaDaily:cfg.agendaDaily,
     tpWeatherEnabled:cfg.weatherEnabled,tpCardsEnabled:cfg.cardsEnabled,tpCalendarCards:cfg.calendarCards,tpWeatherCards:cfg.weatherCards,tpAlertsEnabled:cfg.alertsEnabled,tpMessagesEnabled:cfg.messagesEnabled};
   Object.entries(toggles).forEach(([k,v])=>{if(byId(k))byId(k).checked=!!v;});
-  byId('tpGradeBand').value=cfg.gradeBand||'1011';byId('tpHourMode').value=cfg.hour24?'24':'12';byId('tpCountdownPassed').checked=!!cfg.countdownPassed;byId('tpDemoSpeed').value=String(cfg.demoSpeed||1);byId('tpOverrideDate').value=iso(new Date());byId('tpOverrideType').value=cfg.calendarOverrides?.[iso(new Date())]||'';byId('tpSettingsNotice').textContent='';byId('tpQueueCount').textContent=state.queue.length+' waiting';refreshSoundOptions();byId('tpTimerSound').value=cfg.timerSound;byId('tpTimerWarningSound').value=cfg.timerWarnSound;byId('tpNotifySound').value=cfg.notifySound;
+  byId('tpAttentionSound').value=cfg.attentionSound||'beep';byId('tpGradeBand').value=cfg.gradeBand||'1011';byId('tpHourMode').value=cfg.hour24?'24':'12';byId('tpCountdownPassed').checked=!!cfg.countdownPassed;byId('tpDemoSpeed').value=String(cfg.demoSpeed||1);byId('tpOverrideDate').value=iso(new Date());byId('tpOverrideType').value=cfg.calendarOverrides?.[iso(new Date())]||'';byId('tpSettingsNotice').textContent='';byId('tpQueueCount').textContent=state.queue.length+' waiting';refreshSoundOptions();byId('tpTimerSound').value=cfg.timerSound;byId('tpTimerWarningSound').value=cfg.timerWarnSound;byId('tpNotifySound').value=cfg.notifySound;byId('tpAttentionSound').value=cfg.attentionSound;
   byId('tpTeacherMsg').textContent=cfg.teacher?.ok?'Connected as '+(cfg.teacher.display||cfg.teacher.name):'No verified teacher code. Student names and live pass logging are locked.';byId('tpHistoryList').innerHTML=state.recent.length?state.recent.slice(0,25).map(t=>'<div class="tp-log-line"><strong>'+esc(t.student)+'</strong> · '+esc(t.where)+' · '+esc(t.status)+'<div class="tp-mini">'+esc(t.section)+' · '+esc(t.duration)+' · '+esc(t.when)+'</div></div>').join(''):'<p class="tp-muted">No passes completed on this device yet.</p>';
   showPane(pane||'connect');byId('tpSettings').hidden=false;
 }
@@ -265,12 +266,12 @@ function saveTeacherSettings(){
   cfg.useRule=checked('tpRuleEnabled');cfg.allowOverride=checked('tpAllowOverride');cfg.passEnabled=checked('tpPassEnabled');
   cfg.timerEnabled=checked('tpTimerEnabled');cfg.timerWarn=clamp(val('tpTimerWarn'),0,3600);
   cfg.timerSound=val('tpTimerSound');cfg.timerWarnSound=val('tpTimerWarningSound');cfg.timerVolume=clamp(val('tpTimerVolume'),0,100);
-  cfg.notificationsEnabled=checked('tpNotifications');cfg.notifyMin=clamp(val('tpNotifyMin'),1,30);cfg.notifySound=val('tpNotifySound');
+  cfg.notificationsEnabled=checked('tpNotifications');cfg.notifyMin=clamp(val('tpNotifyMin'),1,30);cfg.notifySound=val('tpNotifySound');cfg.notify15=checked('tpNotify15');cfg.notify10=checked('tpNotify10');cfg.notify5=checked('tpNotify5');cfg.ringAtEnd=checked('tpRingAtEnd');cfg.attentionSound=val('tpAttentionSound');
   cfg.agendaEnabled=checked('tpAgendaEnabled');cfg.agendaDaily=checked('tpAgendaDaily');cfg.agendaLead=clamp(val('tpAgendaLead'),0,30);
   cfg.weatherEnabled=checked('tpWeatherEnabled');cfg.cardsEnabled=checked('tpCardsEnabled');cfg.messagesEnabled=checked('tpMessagesEnabled');cfg.alertsEnabled=checked('tpAlertsEnabled');
   cfg.shiftSec=clamp(val('tpShift'),-600,600);cfg.driftDaily=clamp(val('tpDrift'),-10,10);
   cfg.demo=checked('tpDemo');cfg.testMode=checked('tpTestMode');if(cfg.demo&&!cfg.demoStarted)cfg.demoStarted=Date.now();if(!cfg.demo)cfg.demoStarted=0;
-  cfg.url=val('tpUrlInput').trim()||SCHOOL_URL;
+  cfg.url=val('tpUrlInput').trim()||SCHOOL_URL;cfg.timeServer=val('tpTimeServer').trim();
   if(cfg.url&&!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec(?:\?.*)?$/.test(cfg.url)){byId('tpSettingsNotice').textContent='The script URL must be a Google Apps Script /exec HTTPS address.';return;}
   const code=val('tpCodeInput').trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
   if(code!==cfg.code){cfg.code=code;cfg.teacher=null;cfg.rosters={};cfg.groups={};cfg.sections={};}
@@ -489,13 +490,13 @@ async function removeSound(id) {
 }
 function renderSoundList(){
  const box=byId('tpSoundLibrary');if(!box)return;
- box.innerHTML=soundNames.length?soundNames.map(x=>
+ const visible=[...soundNames,...(cfg.schoolSounds||[]).map(name=>({id:'school:'+name,name}))];box.innerHTML=visible.length?visible.map(x=>
   '<div class="tp-inline"><span class="tp-mini">'+esc(x.name)+'</span><div class="tp-row"><button class="tp-smallbtn" data-tp-action="soundPlay" data-sound-id="'+esc(x.id)+'">Test</button><button class="tp-smallbtn" data-tp-action="soundRemove" data-sound-id="'+esc(x.id)+'">Remove</button></div></div>').join('')
   :'<p class="tp-muted">No custom sounds on this device.</p>';
 }
 function refreshSoundOptions(){
- const options=[['bell','School bell'],['beep','Short chime'],['none','Off'],...soundNames.map(x=>['custom:'+x.id,x.name])];
- ['tpTimerSound','tpTimerWarningSound','tpNotifySound'].forEach(id=>{
+ const options=[['bell','School bell'],['beep','Short chime'],['none','Off'],...soundNames.map(x=>['custom:'+x.id,x.name]),...(cfg.schoolSounds||[]).map(name=>['school:'+name,name.replace(/\.[^.]+$/,'').replaceAll('_',' ')])];
+ ['tpTimerSound','tpTimerWarningSound','tpNotifySound','tpAttentionSound'].forEach(id=>{
   const el=byId(id);if(!el)return;const selected=el.value;
   el.innerHTML=options.map(([v,name])=>'<option value="'+esc(v)+'">'+esc(name)+'</option>').join('');
   el.value=options.some(x=>x[0]===selected)?selected:'none';
@@ -506,7 +507,7 @@ async function loadSounds(){
  try{soundNames=(await soundItems()).map(x=>({id:x.id,name:x.name}));refreshSoundOptions();
    byId('tpTimerSound').value=cfg.timerSound;
    byId('tpTimerWarningSound').value=cfg.timerWarnSound;
-   byId('tpNotifySound').value=cfg.notifySound;
+   byId('tpNotifySound').value=cfg.notifySound;byId('tpAttentionSound').value=cfg.attentionSound;
  }catch(e){console.warn('Classroom sound storage unavailable',e);}
 }
 async function uploadSounds(e){
@@ -519,9 +520,41 @@ async function uploadSounds(e){
  }
  refreshSoundOptions();
 }
+async function refreshSchoolSounds(){
+ try{
+   let names=[];
+   try {
+     const r=await fetch('https://api.github.com/repos/shloksheth/School-Class-Timer/contents/teacher-sounds',{cache:'no-store'});
+     if(r.ok){const j=await r.json();if(Array.isArray(j))names=j.filter(x=>x.type==='file').map(x=>x.name);}
+   }catch(_){}
+   if(!names.length){
+     const r=await fetch('teacher-sounds/index.json',{cache:'no-store'});
+     if(r.ok){const data=await r.json();names=Array.isArray(data)?data:(data.files||[]);}
+   }
+   cfg.schoolSounds=names.map(String).filter(n=>/^[\w. ()-]+\.(mp3|wav|ogg|m4a|aac)$/i.test(n));
+   save();refreshSoundOptions();
+   byId('tpSettingsNotice').textContent=cfg.schoolSounds.length+' school sounds available.';
+ }catch(_){byId('tpSettingsNotice').textContent='Could not load the sounds folder. Custom sounds remain available offline.';}
+}
+async function syncTime(){
+ const urls=[cfg.timeServer,'https://timeapi.io/api/Time/current/zone?timeZone=UTC'].filter(Boolean);
+ byId('tpSyncStatus').textContent='Synchronizing...';
+ for(const url of urls){
+  if(!/^https:\/\//i.test(url))continue;
+  try{
+   const r=await fetch(url,{cache:'no-store'});if(!r.ok)continue;
+   const d=await r.json();
+   const s=typeof d.unixtime==='number'?d.unixtime*1000:Date.parse(d.utc_datetime||d.dateTime||d.datetime||'');
+   if(!Number.isFinite(s))continue;
+   cfg.timeOffsetMs=Math.round(s-Date.now());save();
+   byId('tpSyncStatus').textContent='Synced. Device correction '+cfg.timeOffsetMs+' ms.';tick();return;
+  }catch(_){}
+ }
+ byId('tpSyncStatus').textContent='Network time unavailable. Using device time.';
+}
 function playSound(which){
   if(!which||which==='none')return;
-  if(String(which).startsWith('custom:')){const id=String(which).slice(7);soundItems().then(items=>{const item=items.find(x=>x.id===id);if(!item)return;const old=soundBlobCache.get(id);if(old)URL.revokeObjectURL(old);const url=URL.createObjectURL(item.blob);soundBlobCache.set(id,url);const a=new Audio(url);a.volume=clamp(cfg.timerVolume,0,100)/100;a.play().catch(()=>{});}).catch(()=>{});return;}if(which==='bell'){
+  if(String(which).startsWith('school:')){const name=String(which).slice(7);if(!/^[\w. ()-]+\.(mp3|wav|ogg|m4a|aac)$/i.test(name))return;const a=new Audio('teacher-sounds/'+encodeURIComponent(name));a.volume=clamp(cfg.timerVolume,0,100)/100;a.play().catch(()=>{});return;}if(String(which).startsWith('custom:')){const id=String(which).slice(7);soundItems().then(items=>{const item=items.find(x=>x.id===id);if(!item)return;const old=soundBlobCache.get(id);if(old)URL.revokeObjectURL(old);const url=URL.createObjectURL(item.blob);soundBlobCache.set(id,url);const a=new Audio(url);a.volume=clamp(cfg.timerVolume,0,100)/100;a.play().catch(()=>{});}).catch(()=>{});return;}if(which==='bell'){
     const audio=byId('bellAudio');
     if(audio){audio.pause();audio.currentTime=0;audio.volume=clamp(cfg.timerVolume,0,100)/100;audio.play().catch(()=>{});}return;
   }
@@ -556,9 +589,19 @@ function tick(){
  byId('tpCountdownLabel').textContent=cfg.countdownPassed&&sc.current?'Time passed this block':win.status==='open'?'Until passes close':win.status==='closed'?'Until passes open or class ends':sc.next?'Until '+sc.next.displayName:'No active school period';
  paintLesson(win,sc);renderPasses(sc,win);renderTimer();renderSchedule(sc);renderAgenda(sc);renderCards(sc);renderWeather();
  if(cfg.notificationsEnabled&&sc.classRow){
-   const rem=mins(sc.classRow.end)*60-sc.seconds,key=iso(sc.now)+sc.code;
-   if(rem>0&&rem<=cfg.notifyMin*60&&lastNotify!==key){lastNotify=key;playSound(cfg.notifySound);}
- }
+   const remaining=mins(sc.classRow.end)*60-sc.seconds,code=iso(sc.now)+sc.code;
+   if(previousBellCode===code&&previousBellRemain!==null){
+    const thresholds=[cfg.notify15?900:0,cfg.notify10?600:0,cfg.notify5?300:0,cfg.notifyMin*60,cfg.ringAtEnd?0:-1]
+      .filter(x=>x>=0).sort((a,b)=>b-a);
+    for(const threshold of thresholds){
+      if(previousBellRemain>threshold&&remaining<=threshold){
+       playSound(threshold===0?'bell':cfg.notifySound);
+       break;
+      }
+    }
+   }
+   previousBellCode=code;previousBellRemain=remaining;
+ }else{previousBellCode='';previousBellRemain=null;}
  updateWeather();updateMessages();
  if(sc.now.getSeconds()===0&&sc.now.getMinutes()%5===0){flushQueue();if(cfg.code&&!cfg.demo&&(!cfg.teacher?.checkedAt||Date.now()-cfg.teacher.checkedAt>300000))verifyTeacher(false);}
  document.title=sc.rotation?sc.rotation+' Day · Teacher Mode':'Teacher Mode · Orlando Science';
@@ -677,7 +720,7 @@ function onClick(ev){
  if(act==='resetDrift'){cfg.shiftSec=0;cfg.driftDaily=0;cfg.driftAt=Date.now();byId('tpShift').value=0;byId('tpDrift').value=0;save();return;}
  if(act==='flushQueue')return flushQueue();
  if(act==='exportTrips')return exportTrips();if(act==='toggleFullscreen'){if(document.fullscreenElement)document.exitFullscreen?.();else byId('glassRoot').requestFullscreen?.();return;}if(act==='saveOverride'){const d=val('tpOverrideDate'),o=val('tpOverrideType');if(!/^\d{4}-\d\d-\d\d$/.test(d))return;cfg.calendarOverrides=cfg.calendarOverrides||{};if(o)cfg.calendarOverrides[d]=o;else delete cfg.calendarOverrides[d];save();lastTickKey='';byId('tpSettingsNotice').textContent='Calendar override saved for '+d;tick();return;}
- if(act==='testTeacherSound')return playSound(val('tpTimerSound'));if(act==='soundPlay')return playSound('custom:'+btn.dataset.soundId);if(act==='soundRemove'){const id=btn.dataset.soundId;return removeSound(id).then(()=>{soundNames=soundNames.filter(x=>x.id!==id);refreshSoundOptions();});}
+ if(act==='testTeacherSound')return playSound(val('tpTimerSound'));if(act==='soundPlay')return playSound(btn.dataset.soundId.startsWith('school:')?btn.dataset.soundId:'custom:'+btn.dataset.soundId);if(act==='soundRemove'){const id=btn.dataset.soundId;if(id.startsWith('school:')){cfg.schoolSounds=(cfg.schoolSounds||[]).filter(n=>'school:'+n!==id);save();refreshSoundOptions();return;}return removeSound(id).then(()=>{soundNames=soundNames.filter(x=>x.id!==id);refreshSoundOptions();});}if(act==='refreshSchoolSounds')return refreshSchoolSounds();if(act==='attentionSignal')return playSound(cfg.attentionSound);if(act==='syncTime')return syncTime();
  if(act==='shiftMinus'||act==='shiftPlus'){cfg.shiftSec=clamp(Number(cfg.shiftSec)+(act==='shiftPlus'?1:-1),-600,600);save();tick();return;}
  if(act==='newPass')return openPick();
  if(act==='closePick')return closePick();

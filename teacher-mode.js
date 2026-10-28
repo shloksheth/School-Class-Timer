@@ -17,7 +17,7 @@ const defaults = {
   agendaEnabled:true,agendaDaily:false,agendaLead:5,agenda:{},
   weatherEnabled:false,cardsEnabled:false,cardSeconds:20,calendarCards:true,weatherCards:false,alertsEnabled:false,messagesEnabled:false,
   notificationsEnabled:false,notifyMin:5,notifySound:'bell',passEnabled:true,
-  demo:false,shiftSec:0,driftDaily:0,driftAt:Date.now(),pinHash:'',pinSalt:'',
+  demo:false,testMode:false,shiftSec:0,driftDaily:0,driftAt:Date.now(),pinHash:'',pinSalt:'',
   boardId:'board-'+Math.random().toString(36).slice(2,8)
 };
 function parseStore(key, fallback) {
@@ -44,6 +44,7 @@ const secDay=d=>d.getHours()*3600+d.getMinutes()*60+d.getSeconds();
 const mins=s=>{const p=String(s||'0:00').split(':').map(Number);return p[0]*60+p[1];};
 const save=()=>{localStorage.setItem(CFG_KEY,JSON.stringify(cfg));localStorage.setItem(STATE_KEY,JSON.stringify(state));};
 const nowDate=()=>new Date(Date.now()+Number(cfg.shiftSec||0)*1000+Number(cfg.driftDaily||0)*((Date.now()-(cfg.driftAt||Date.now()))/86400000)*1000+(cfg.demo?Math.max(0,Date.now()-(cfg.demoStarted||Date.now()))*(Number(cfg.demoSpeed||1)-1):0));
+let soundNames=[],soundDb=null;const soundBlobCache=new Map();
 const iso=d=>[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');
 const sectionCode=(row,rotation)=>{
  if(!row||!row.periodNumber||!rotation)return '';
@@ -149,7 +150,7 @@ function teacherSettingsHTML() {
   '<div class="tp-field full"><label><input type="checkbox" id="tpRuleEnabled">Enforce 10/10 rule</label></div>'+
   '<div class="tp-field full"><label><input type="checkbox" id="tpAllowOverride">Allow one-time teacher override while closed</label></div>'+
   '<div class="tp-field full"><label><input type="checkbox" id="tpPassEnabled">Enable pass buttons</label></div>'+
-  '<div class="tp-field full"><label><input type="checkbox" id="tpDemo">Demo passes with sample names (never sent to Google Sheets)</label></div>'+
+  '<div class="tp-field full"><label><input type="checkbox" id="tpDemo">Demo passes with sample names (never sent to Google Sheets)</label></div><div class="tp-field full"><label><input type="checkbox" id="tpTestMode">Log verified test trips as TEST instead of LIVE</label></div><div class="tp-field full"><h3>Pass history</h3><div id="tpHistoryList" class="tp-stack"></div></div>'+
   '</div></section>'+
   '<section class="tp-pane" id="tpPane-timer" hidden><div class="tp-form">'+
   '<div class="tp-field full"><label><input type="checkbox" id="tpTimerEnabled">Show classroom timer</label></div>'+
@@ -160,7 +161,7 @@ function teacherSettingsHTML() {
   '<div class="tp-field full"><label><input type="checkbox" id="tpNotifications">Bell countdown notifications</label></div>'+
   '<div class="tp-field"><label>Alert before class ends (min)</label><input id="tpNotifyMin" type="number" min="1" max="30"></div>'+
   '<div class="tp-field"><label>Bell notification sound</label><select id="tpNotifySound"><option value="bell">School bell</option><option value="beep">Short chime</option><option value="none">Off</option></select></div>'+
-  '<div class="tp-field full"><button class="liquid-btn" type="button" data-tp-action="testTeacherSound">Test selected end sound</button></div>'+
+  '<div class="tp-field full"><button class="liquid-btn" type="button" data-tp-action="testTeacherSound">Test selected end sound</button></div><div class="tp-field full"><h3>Sound library</h3><p class="tp-muted">Add your own short audio files. Each sound can be selected independently for timer end, warning, and bell notification. Files are stored on this device for offline use.</p><input type="file" accept="audio/mpeg,audio/mp3,audio/wav,audio/ogg,audio/mp4,audio/aac" id="tpSoundUpload" multiple aria-label="Upload classroom sounds"><div id="tpSoundLibrary" class="tp-stack"></div></div>'+
   '</div></section>'+
   '<section class="tp-pane" id="tpPane-agenda" hidden><div class="tp-form">'+
   '<div class="tp-field full"><label><input type="checkbox" id="tpAgendaEnabled">Display lesson agenda</label></div>'+
@@ -210,7 +211,7 @@ function attach(){
   settingsMain.insertBefore(quick,byId('editorEmpty'));
   byId('tpSwitchSettings').addEventListener('click',()=>{if(typeof hasUnsavedProfileChanges==='function'&&hasUnsavedProfileChanges()){requestCloseSettings();return;} if(typeof finalizeCloseSettings==='function')finalizeCloseSettings();showRoleChooser();});
   nav.addEventListener('click',()=>{if(role==='teacher'){window.scrollTo({top:0,behavior:'smooth'}); nav.classList.add('active');}});
-  document.addEventListener('click',onClick);
+  document.addEventListener('click',onClick);byId('tpSoundUpload').addEventListener('change',uploadSounds);loadSounds();
   byId('tpStudent').addEventListener('change',()=>{byId('tpGuestWrap').hidden=val('tpStudent')!=='__guest';});
   byId('tpAgendaSection').addEventListener('change',showAgendaEditor);
   document.addEventListener('keydown',e=>{if(e.key!=='Escape')return;if(!byId('tpPick').hidden)closePick();else if(!byId('tpTimerDialog').hidden)byId('tpTimerDialog').hidden=true;else if(!byId('tpSettings').hidden)closeSettings();});
@@ -247,12 +248,12 @@ async function openSettings(pane){
     tpDestinations:cfg.destinations,tpTimerWarn:cfg.timerWarn,tpTimerSound:cfg.timerSound,tpTimerWarningSound:cfg.timerWarnSound,
     tpTimerVolume:cfg.timerVolume,tpNotifyMin:cfg.notifyMin,tpNotifySound:cfg.notifySound,tpAgendaLead:cfg.agendaLead,tpShift:cfg.shiftSec,tpDrift:cfg.driftDaily,tpCardSeconds:cfg.cardSeconds};
   Object.entries(values).forEach(([k,v])=>{if(byId(k))byId(k).value=v;});
-  const toggles={tpRuleEnabled:cfg.useRule,tpAllowOverride:cfg.allowOverride,tpPassEnabled:cfg.passEnabled,tpDemo:cfg.demo,
+  const toggles={tpRuleEnabled:cfg.useRule,tpAllowOverride:cfg.allowOverride,tpPassEnabled:cfg.passEnabled,tpDemo:cfg.demo,tpTestMode:cfg.testMode,
     tpTimerEnabled:cfg.timerEnabled,tpNotifications:cfg.notificationsEnabled,tpAgendaEnabled:cfg.agendaEnabled,tpAgendaDaily:cfg.agendaDaily,
     tpWeatherEnabled:cfg.weatherEnabled,tpCardsEnabled:cfg.cardsEnabled,tpCalendarCards:cfg.calendarCards,tpWeatherCards:cfg.weatherCards,tpAlertsEnabled:cfg.alertsEnabled,tpMessagesEnabled:cfg.messagesEnabled};
   Object.entries(toggles).forEach(([k,v])=>{if(byId(k))byId(k).checked=!!v;});
-  byId('tpGradeBand').value=cfg.gradeBand||'1011';byId('tpHourMode').value=cfg.hour24?'24':'12';byId('tpCountdownPassed').checked=!!cfg.countdownPassed;byId('tpDemoSpeed').value=String(cfg.demoSpeed||1);byId('tpOverrideDate').value=iso(new Date());byId('tpOverrideType').value=cfg.calendarOverrides?.[iso(new Date())]||'';byId('tpSettingsNotice').textContent='';byId('tpQueueCount').textContent=state.queue.length+' waiting';
-  byId('tpTeacherMsg').textContent=cfg.teacher?.ok?'Connected as '+esc(cfg.teacher.display||cfg.teacher.name):'No verified teacher code. Student names and live pass logging are locked.';
+  byId('tpGradeBand').value=cfg.gradeBand||'1011';byId('tpHourMode').value=cfg.hour24?'24':'12';byId('tpCountdownPassed').checked=!!cfg.countdownPassed;byId('tpDemoSpeed').value=String(cfg.demoSpeed||1);byId('tpOverrideDate').value=iso(new Date());byId('tpOverrideType').value=cfg.calendarOverrides?.[iso(new Date())]||'';byId('tpSettingsNotice').textContent='';byId('tpQueueCount').textContent=state.queue.length+' waiting';refreshSoundOptions();byId('tpTimerSound').value=cfg.timerSound;byId('tpTimerWarningSound').value=cfg.timerWarnSound;byId('tpNotifySound').value=cfg.notifySound;
+  byId('tpTeacherMsg').textContent=cfg.teacher?.ok?'Connected as '+(cfg.teacher.display||cfg.teacher.name):'No verified teacher code. Student names and live pass logging are locked.';byId('tpHistoryList').innerHTML=state.recent.length?state.recent.slice(0,25).map(t=>'<div class="tp-log-line"><strong>'+esc(t.student)+'</strong> · '+esc(t.where)+' · '+esc(t.status)+'<div class="tp-mini">'+esc(t.section)+' · '+esc(t.duration)+' · '+esc(t.when)+'</div></div>').join(''):'<p class="tp-muted">No passes completed on this device yet.</p>';
   showPane(pane||'connect');byId('tpSettings').hidden=false;
 }
 function closeSettings(){byId('tpSettings').hidden=true;}
@@ -268,7 +269,7 @@ function saveTeacherSettings(){
   cfg.agendaEnabled=checked('tpAgendaEnabled');cfg.agendaDaily=checked('tpAgendaDaily');cfg.agendaLead=clamp(val('tpAgendaLead'),0,30);
   cfg.weatherEnabled=checked('tpWeatherEnabled');cfg.cardsEnabled=checked('tpCardsEnabled');cfg.messagesEnabled=checked('tpMessagesEnabled');cfg.alertsEnabled=checked('tpAlertsEnabled');
   cfg.shiftSec=clamp(val('tpShift'),-600,600);cfg.driftDaily=clamp(val('tpDrift'),-10,10);
-  cfg.demo=checked('tpDemo');
+  cfg.demo=checked('tpDemo');cfg.testMode=checked('tpTestMode');if(cfg.demo&&!cfg.demoStarted)cfg.demoStarted=Date.now();if(!cfg.demo)cfg.demoStarted=0;
   cfg.url=val('tpUrlInput').trim()||SCHOOL_URL;
   if(cfg.url&&!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec(?:\?.*)?$/.test(cfg.url)){byId('tpSettingsNotice').textContent='The script URL must be a Google Apps Script /exec HTTPS address.';return;}
   const code=val('tpCodeInput').trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
@@ -455,9 +456,72 @@ function renderTimer(){
   byId('tpTimerToggle').textContent=t.running?'Pause':seconds?'Start':'Set time';
   byId('tpTimerState').textContent=t.running?'Running':t.ended?'Finished':'Paused / ready';
 }
+async function soundStorage() {
+ if(soundDb)return soundDb;
+ soundDb=await new Promise((resolve,reject)=>{
+  if(!window.indexedDB){reject(new Error('IndexedDB not supported'));return;}
+  const r=indexedDB.open('oss-teacher-sounds',1);
+  r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains('sounds'))r.result.createObjectStore('sounds',{keyPath:'id'});};
+  r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);
+ });
+ return soundDb;
+}
+async function soundItems() {
+ const db=await soundStorage();
+ return new Promise((resolve,reject)=>{
+  const req=db.transaction('sounds').objectStore('sounds').getAll();
+  req.onsuccess=()=>resolve(req.result||[]);req.onerror=()=>reject(req.error);
+ });
+}
+async function saveSound(item){
+ const db=await soundStorage();
+ return new Promise((resolve,reject)=>{
+  const tx=db.transaction('sounds','readwrite');tx.objectStore('sounds').put(item);
+  tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);
+ });
+}
+async function removeSound(id) {
+ const db=await soundStorage();
+ return new Promise((resolve,reject)=>{
+  const tx=db.transaction('sounds','readwrite');tx.objectStore('sounds').delete(id);
+  tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);
+ });
+}
+function renderSoundList(){
+ const box=byId('tpSoundLibrary');if(!box)return;
+ box.innerHTML=soundNames.length?soundNames.map(x=>
+  '<div class="tp-inline"><span class="tp-mini">'+esc(x.name)+'</span><div class="tp-row"><button class="tp-smallbtn" data-tp-action="soundPlay" data-sound-id="'+esc(x.id)+'">Test</button><button class="tp-smallbtn" data-tp-action="soundRemove" data-sound-id="'+esc(x.id)+'">Remove</button></div></div>').join('')
+  :'<p class="tp-muted">No custom sounds on this device.</p>';
+}
+function refreshSoundOptions(){
+ const options=[['bell','School bell'],['beep','Short chime'],['none','Off'],...soundNames.map(x=>['custom:'+x.id,x.name])];
+ ['tpTimerSound','tpTimerWarningSound','tpNotifySound'].forEach(id=>{
+  const el=byId(id);if(!el)return;const selected=el.value;
+  el.innerHTML=options.map(([v,name])=>'<option value="'+esc(v)+'">'+esc(name)+'</option>').join('');
+  el.value=options.some(x=>x[0]===selected)?selected:'none';
+ });
+ renderSoundList();
+}
+async function loadSounds(){
+ try{soundNames=(await soundItems()).map(x=>({id:x.id,name:x.name}));refreshSoundOptions();
+   byId('tpTimerSound').value=cfg.timerSound;
+   byId('tpTimerWarningSound').value=cfg.timerWarnSound;
+   byId('tpNotifySound').value=cfg.notifySound;
+ }catch(e){console.warn('Classroom sound storage unavailable',e);}
+}
+async function uploadSounds(e){
+ const files=[...(e.target.files||[])];e.target.value='';
+ for(const file of files){
+  if(file.size>5*1024*1024||!/^audio\//.test(file.type)){window.alert('Choose audio files smaller than 5 MB each.');continue;}
+  const id='local_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
+  try{await saveSound({id,name:file.name.slice(0,80),blob:file});soundNames.push({id,name:file.name.slice(0,80)});}
+  catch(err){window.alert('Could not save sound: '+err.message);}
+ }
+ refreshSoundOptions();
+}
 function playSound(which){
   if(!which||which==='none')return;
-  if(which==='bell'){
+  if(String(which).startsWith('custom:')){const id=String(which).slice(7);soundItems().then(items=>{const item=items.find(x=>x.id===id);if(!item)return;const old=soundBlobCache.get(id);if(old)URL.revokeObjectURL(old);const url=URL.createObjectURL(item.blob);soundBlobCache.set(id,url);const a=new Audio(url);a.volume=clamp(cfg.timerVolume,0,100)/100;a.play().catch(()=>{});}).catch(()=>{});return;}if(which==='bell'){
     const audio=byId('bellAudio');
     if(audio){audio.pause();audio.currentTime=0;audio.volume=clamp(cfg.timerVolume,0,100)/100;audio.play().catch(()=>{});}return;
   }
@@ -545,7 +609,7 @@ function confirmPass(){
 function completePass(id,status){
  const index=state.active.findIndex(x=>x.id===id);if(index<0)return;
  const p=state.active[index],now=Date.now();
- if(status==='Cancelled'&&now-p.outMs>30000&&cfg.pinHash){
+ if(status==='Cancelled'&&now-p.outMs>30000&&!cfg.pinHash&&!window.confirm('Cancel this pass? The cancelled trip stays in the log.'))return;if(status==='Cancelled'&&now-p.outMs>30000&&cfg.pinHash){
    const pin=window.prompt('Enter settings PIN to cancel this older trip:');
    if(pin===null)return;
    checkPin(pin).then(ok=>{if(ok)completePassConfirmed(id,status);else window.alert('Incorrect PIN.');});return;
@@ -562,7 +626,7 @@ function completePassConfirmed(id,status){
  state.recent.unshift(trip);state.recent=state.recent.slice(0,100);
  if(!cfg.demo&&p.teacher&&p.teacher!=='DEMO'){
    const payload={i:stamp(p.outMs,back),s:p.studentId||'',sec:p.section,blk:p.section,w:p.where,
-     to:String(p.outMs),ti:String(back),o:p.outside?'1':'',m:'LIVE',b:cfg.boardId,st:status,g:p.guest?p.student:''};
+     to:String(p.outMs),ti:String(back),o:p.outside?'1':'',m:cfg.testMode?'TEST':'LIVE',b:cfg.boardId,st:status,g:p.guest?p.student:''};
    state.queue.push({id:p.id,teacher:p.teacher,payload});
  }
  save();tick();flushQueue();
@@ -613,7 +677,7 @@ function onClick(ev){
  if(act==='resetDrift'){cfg.shiftSec=0;cfg.driftDaily=0;cfg.driftAt=Date.now();byId('tpShift').value=0;byId('tpDrift').value=0;save();return;}
  if(act==='flushQueue')return flushQueue();
  if(act==='exportTrips')return exportTrips();if(act==='toggleFullscreen'){if(document.fullscreenElement)document.exitFullscreen?.();else byId('glassRoot').requestFullscreen?.();return;}if(act==='saveOverride'){const d=val('tpOverrideDate'),o=val('tpOverrideType');if(!/^\d{4}-\d\d-\d\d$/.test(d))return;cfg.calendarOverrides=cfg.calendarOverrides||{};if(o)cfg.calendarOverrides[d]=o;else delete cfg.calendarOverrides[d];save();lastTickKey='';byId('tpSettingsNotice').textContent='Calendar override saved for '+d;tick();return;}
- if(act==='testTeacherSound')return playSound(val('tpTimerSound'));
+ if(act==='testTeacherSound')return playSound(val('tpTimerSound'));if(act==='soundPlay')return playSound('custom:'+btn.dataset.soundId);if(act==='soundRemove'){const id=btn.dataset.soundId;return removeSound(id).then(()=>{soundNames=soundNames.filter(x=>x.id!==id);refreshSoundOptions();});}
  if(act==='shiftMinus'||act==='shiftPlus'){cfg.shiftSec=clamp(Number(cfg.shiftSec)+(act==='shiftPlus'?1:-1),-600,600);save();tick();return;}
  if(act==='newPass')return openPick();
  if(act==='closePick')return closePick();

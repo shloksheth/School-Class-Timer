@@ -5,7 +5,7 @@ const {spawn}=require('node:child_process');
  const server=spawn('python3',['-m','http.server','8765','--bind','127.0.0.1'],{stdio:'ignore'});
  let browser;
  try{
-  browser=await chromium.launch({headless:true});
+  browser=await chromium.launch({headless:true,channel:'chrome',args:['--no-sandbox']});
   const context=await browser.newContext({timezoneId:'America/New_York',reducedMotion:'reduce'});
   const page=await context.newPage(),errors=[];
   page.on('pageerror',e=>errors.push(e.message));

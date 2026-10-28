@@ -400,8 +400,8 @@ function paintLesson(win,sc){
   if(cursor<win.end)closed.push([cursor,win.end]);
   track.innerHTML=closed.map(pair=>'<div class="tp-zone" style="left:'+pct(pair[0])+'%;width:'+(pct(pair[1])-pct(pair[0]))+'%"></div>').join('')+
     '<div class="tp-marker" style="left:'+pct(sc.seconds)+'%"></div>';
-  byId('tpOpenAt').textContent=win.open.length?'Open '+win.open.map(x=>timeLabel(new Date(sc.now.setHours(0,0,0,0)+x[0]*1000))).join(' / '):'No open pass window';
-  byId('tpCloseAt').textContent=win.open.length?'Close '+win.open.map(x=>timeLabel(new Date(sc.now.setHours(0,0,0,0)+x[1]*1000))).join(' / '):'';
+  byId('tpOpenAt').textContent=win.open.length?'Open '+win.open.map(x=>timeLabel(new Date(new Date(sc.now.getFullYear(),sc.now.getMonth(),sc.now.getDate()).getTime()+x[0]*1000))).join(' / '):'No open pass window';
+  byId('tpCloseAt').textContent=win.open.length?'Close '+win.open.map(x=>timeLabel(new Date(new Date(sc.now.getFullYear(),sc.now.getMonth(),sc.now.getDate()).getTime()+x[1]*1000))).join(' / '):'';
 }
 function renderPasses(sc,win){
   const total=state.active.length;

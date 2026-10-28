@@ -119,3 +119,11 @@ html[data-app-role="teacher"] #grade,html[data-app-role="teacher"] #bellToggle{d
 .tp-slot small{font-size:9px;color:var(--muted)}
 .tp-slot:disabled{opacity:.45}
 .tp-timer-pad button{font-variant-numeric:tabular-nums}
+
+.tp-day-arc{--arc-progress:0%;width:150px;height:150px;margin:14px auto;display:grid;place-items:center;border-radius:50%;background:conic-gradient(var(--blue) var(--arc-progress),var(--panel-soft) 0);position:relative;box-shadow:inset 0 1px 0 var(--glass-border)}
+.tp-day-arc:before{content:"";position:absolute;inset:14px;background:var(--panel-strong);border-radius:50%;border:1px solid var(--line)}
+.tp-day-arc-middle{position:relative;display:flex;flex-direction:column;align-items:center;gap:3px}
+.tp-day-arc-middle strong{font-size:25px;font-weight:800}
+.tp-day-arc-middle small{font-size:9px;color:var(--muted)}
+.tp-alerts-banner{margin:0 0 15px;padding:14px 16px;background:rgba(231,126,80,.15);border:1px solid rgba(221,129,81,.23);border-radius:15px;font-size:11px;line-height:1.7}
+.tp-alerts-banner strong{font-weight:800}

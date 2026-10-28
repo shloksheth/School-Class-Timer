@@ -33,7 +33,7 @@ if(!Array.isArray(state.recent))state.recent=[];
 let role=localStorage.getItem(KEY);
 if(role!=='student'&&role!=='teacher')role=null;
 let weather=null,messages=[],lastWx=0,lastMsg=0,lastNotify='',requestCount=0,flushing=false;
-let choosing=false,chooserPeriod='',pendingLeave=null,lastTickKey='',activePane='connect',previousBellRemain=null,previousBellCode='';
+let choosing=false,chooserPeriod='',pendingLeave=null,lastTickKey='',activePane='connect',previousBellRemain=null,previousBellCode='',pickerCandidates=[],pickerLetter='',timerDigits='';
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const val=id=>byId(id)?.value||'';
 const checked=id=>!!byId(id)?.checked;
@@ -109,7 +109,7 @@ function panelHTML(){
         '<div class="tp-stats"><article class="summary-card"><div class="summary-label">Rotation</div><div class="summary-value" id="tpRotation">-</div></article><article class="summary-card"><div class="summary-label">Passes out</div><div class="summary-value" id="tpOut">0</div></article><article class="summary-card"><div class="summary-label">Current time</div><div class="summary-value" id="tpRealTime">--:--</div></article></div>'+
       '</section>'+
       '<section class="tp-panel"><div class="tp-panel-head"><h2>Hall passes</h2><span class="tp-mini" id="tpConnection">Connect a teacher code</span></div>'+
-        '<div class="tp-row"><button class="liquid-btn primary-action" data-tp-action="newPass" id="tpNewPass">+ Start a pass</button><span class="tp-muted" id="tpPassHint"></span></div><div id="tpPassList" class="tp-section"></div></section>'+
+        '<div class="tp-row"><button class="liquid-btn primary-action" data-tp-action="newPass" id="tpNewPass">+ Start a pass</button><span class="tp-muted" id="tpPassHint"></span></div><div id="tpSlotGrid" class="tp-slot-grid" aria-label="Available hall pass slots"></div><div id="tpPassList" class="tp-section"></div></section>'+
       '<section class="tp-panel" id="tpAgendaPanel"><div class="tp-panel-head"><h2>Lesson agenda</h2><button class="tp-smallbtn" data-tp-action="editAgenda">Edit</button></div><div id="tpAgendaContent" class="tp-agenda-list tp-muted">No agenda for this period.</div></section>'+
       '<section class="tp-panel"><div class="tp-panel-head"><h2>Bell schedule</h2><span id="tpScheduleType" class="tp-mini"></span></div><div id="tpScheduleRows" class="tp-stack"></div></section>'+
     '</div><div>'+
@@ -193,7 +193,7 @@ function teacherSettingsHTML() {
 }
 function pickerHTML(){
   return '<div class="tp-modal tp-picker" id="tpPick" hidden><section class="tp-dialog" role="dialog" aria-modal="true" aria-labelledby="tpPickTitle"><div class="tp-toolbar"><div><div class="tp-kicker">Hall pass</div><h2 id="tpPickTitle">Start a pass</h2></div><button class="liquid-btn" data-tp-action="closePick">Close</button></div>'+
-  '<div class="tp-form"><div class="tp-field"><label>Student</label><select id="tpStudent"></select></div><div class="tp-field" id="tpGuestWrap" hidden><label>Guest student name</label><input id="tpGuestName" maxlength="70"></div>'+
+  '<div class="tp-form"><div class="tp-field full"><label>Find a student (or choose a first letter)</label><input id="tpStudentSearch" type="search" placeholder="Start typing a name"><div class="tp-letters" id="tpStudentLetters"></div></div><div class="tp-field"><label>Student</label><select id="tpStudent"></select></div><div class="tp-field" id="tpGuestWrap" hidden><label>Guest student name</label><input id="tpGuestName" maxlength="70"></div>'+
   '<div class="tp-field"><label>Destination</label><select id="tpDestination"></select></div></div>'+
   '<div id="tpPickWarning" class="tp-inline-status"></div><div class="tp-foot"><button class="liquid-btn" data-tp-action="closePick">Cancel</button><button class="liquid-btn primary-action" id="tpConfirmPass" data-tp-action="confirmPass">Start pass</button></div></section></div>';
 }
@@ -201,6 +201,7 @@ function timerDialogHTML(){
  return '<div class="tp-modal" id="tpTimerDialog" hidden><section class="tp-dialog" style="max-width:480px" role="dialog" aria-modal="true"><div class="tp-toolbar"><h2>Set classroom timer</h2><button class="liquid-btn" data-tp-action="timerDialogClose">Close</button></div><div class="tp-form" style="margin-top:18px">'+
  '<div class="tp-field"><label>Minutes</label><input id="tpTimerMinutes" type="number" min="0" max="999"></div><div class="tp-field"><label>Seconds</label><input id="tpTimerSeconds" type="number" min="0" max="59"></div></div>'+
  '<div class="tp-pills tp-section">'+[-60,-10,10,60,300].map(n=>'<button class="tp-smallbtn" data-tp-action="timerAdjust" data-sec="'+n+'">'+(n>0?'+':'')+n+'s</button>').join('')+'</div>'+
+ '<div class="tp-section"><h3>Quick keypad</h3><div class="tp-timer-pad">'+[1,2,3,4,5,6,7,8,9,0,"00","⌫"].map(k=>'<button type="button" class="tp-smallbtn" data-tp-action="timerKey" data-key="'+k+'">'+k+'</button>').join('')+'</div><p class="tp-muted">Enter digits like a microwave. For example, 1500 means 15 minutes.</p><div id="tpTimerRecent" class="tp-pills"></div></div>'+
  '<div class="tp-foot"><button class="liquid-btn" data-tp-action="timerSet">Set without starting</button><button class="liquid-btn primary-action" data-tp-action="timerSetStart">Set and start</button></div></section></div>';
 }
 function attach(){
@@ -213,7 +214,7 @@ function attach(){
   byId('tpSwitchSettings').addEventListener('click',()=>{if(typeof hasUnsavedProfileChanges==='function'&&hasUnsavedProfileChanges()){requestCloseSettings();return;} if(typeof finalizeCloseSettings==='function')finalizeCloseSettings();showRoleChooser();});
   nav.addEventListener('click',()=>{if(role==='teacher'){window.scrollTo({top:0,behavior:'smooth'}); nav.classList.add('active');}});
   document.addEventListener('click',onClick);byId('tpSoundUpload').addEventListener('change',uploadSounds);loadSounds();
-  byId('tpStudent').addEventListener('change',()=>{byId('tpGuestWrap').hidden=val('tpStudent')!=='__guest';});
+  byId('tpStudent').addEventListener('change',()=>{byId('tpGuestWrap').hidden=val('tpStudent')!=='__guest';});byId('tpStudentSearch').addEventListener('input',()=>{pickerLetter='';renderStudentChoices();});
   byId('tpAgendaSection').addEventListener('change',showAgendaEditor);
   document.addEventListener('keydown',e=>{if(e.key!=='Escape')return;if(!byId('tpPick').hidden)closePick();else if(!byId('tpTimerDialog').hidden)byId('tpTimerDialog').hidden=true;else if(!byId('tpSettings').hidden)closeSettings();});
   const hash=new URLSearchParams(location.hash.replace(/^#/,''));
@@ -224,7 +225,7 @@ function attach(){
   setTimeout(()=>{if(role==='teacher'){tick();if(cfg.code&&!cfg.demo)verifyTeacher(false);}},350);
 }
 function showRoleChooser(){byId('tpRoleCover').hidden=false;document.body.style.overflow='hidden';byId('tpRoleHeading').focus?.();}
-function setRole(next){role=next;localStorage.setItem(KEY,role);byId('tpRoleCover').hidden=true;document.body.style.overflow='';activate(role);}
+function setRole(next){role=next;localStorage.setItem(KEY,role);byId('tpRoleCover').hidden=true;document.body.style.overflow='';activate(role);if(next==='teacher'&&!cfg.code&&!cfg.demo)openSettings('connect');}
 function activate(next){
   if(!next){document.documentElement.removeAttribute('data-app-role');showRoleChooser();return;}
   document.documentElement.dataset.appRole=next;
@@ -431,7 +432,7 @@ function renderPasses(sc,win){
   const allowed=cfg.passEnabled&&(cfg.demo||hasTeacher())&&!!sc.classRow&&total<cfg.slots;
   byId('tpNewPass').disabled=!allowed;
   byId('tpPassHint').textContent=!cfg.passEnabled?'Passes disabled':!hasTeacher()?'Connect a teacher code to enable passes.':!sc.classRow?'No class in progress':total>=cfg.slots?'All passes in use':win.status!=='open'&&!cfg.allowOverride?'10/10 rule: passes are closed':'';
-  const now=Date.now();
+  const now=Date.now();const free=Math.max(0,cfg.slots-total);byId('tpSlotGrid').innerHTML=Array.from({length:Math.min(24,cfg.slots)},(_,i)=>{const p=state.active[i];if(p)return '<button type="button" class="tp-slot is-used" data-tp-action="returnPass" data-pass-id="'+esc(p.id)+'" title="Tap to return '+esc(p.student)+'"><strong>'+esc(p.student)+'</strong><small>'+esc(p.where)+' · '+fmt((now-p.outMs)/1000)+'</small></button>';return '<button type="button" class="tp-slot" data-tp-action="newPass" '+(allowed?'':'disabled')+'><strong>Pass '+(i+1)+'</strong><small>Available</small></button>';}).join('')+(cfg.slots>24?'<span class="tp-mini">'+(cfg.slots-24)+' more slots</span>':'');
   byId('tpPassList').innerHTML=total?state.active.map(p=>{
     const limit=getDestinations().find(d=>d.name===p.where)?.limit||8;
     const elapsed=Math.floor((now-p.outMs)/1000),overdue=elapsed>limit*60;
@@ -611,13 +612,25 @@ function openPick(){
  if(!hasTeacher()||!sc.classRow||state.active.length>=cfg.slots)return;
  if(win.status!=='open'&&!cfg.allowOverride){window.alert('Hall passes are closed during the first and last '+cfg.startClose+'/'+cfg.endClose+' minutes.');return;}
  chooserPeriod=sc.code;choosing=true;
- const students=sectionStudents(chooserPeriod).filter(x=>!state.active.some(p=>p.studentId===x.id&&p.studentId||p.student===x.name));
+ const students=sectionStudents(chooserPeriod).filter(x=>!state.active.some(p=>(p.studentId&&p.studentId===x.id)||p.student===x.name));pickerCandidates=students;pickerLetter='';byId('tpStudentSearch').value='';
  const select=byId('tpStudent');
- select.innerHTML='<option value="">Select a student</option>'+students.map((s,i)=>'<option value="'+i+'">'+esc(s.name)+'</option>').join('')+'<option value="__guest">Guest / visiting student</option>';
+ renderStudentChoices();
  select._students=students;byId('tpGuestWrap').hidden=true;byId('tpGuestName').value='';
  byId('tpDestination').innerHTML=getDestinations().map(d=>'<option value="'+esc(d.name)+'">'+esc(d.name)+' ('+d.limit+' min)</option>').join('');
  byId('tpPickWarning').textContent=win.status==='closed'?'Passes are currently closed. You will need to confirm an override.':'Passes are open for this class.';
  byId('tpPick').hidden=false;
+}
+function renderStudentChoices(){
+ const search=val('tpStudentSearch').trim().toLowerCase();
+ const students=pickerCandidates.filter(s=>(!pickerLetter||s.name.charAt(0).toUpperCase()===pickerLetter)&&(!search||s.name.toLowerCase().includes(search)));
+ const letters=Array.from(new Set(pickerCandidates.map(s=>s.name.charAt(0).toUpperCase()))).sort();
+ byId('tpStudentLetters').innerHTML='<button class="tp-smallbtn'+(!pickerLetter?' active':'')+'" data-tp-action="studentLetter" data-letter="">All</button>'+
+ letters.map(x=>'<button class="tp-smallbtn'+(pickerLetter===x?' active':'')+'" data-tp-action="studentLetter" data-letter="'+esc(x)+'">'+esc(x)+'</button>').join('');
+ const select=byId('tpStudent');
+ select.innerHTML='<option value="">Select a student ('+students.length+')</option>'+
+ students.map((st,i)=>'<option value="'+i+'">'+esc(st.name)+'</option>').join('')+
+ '<option value="__guest">Guest / visiting student</option>';
+ select._students=students;byId('tpGuestWrap').hidden=true;
 }
 function closePick(){if(pendingLeave){clearTimeout(pendingLeave.timer);pendingLeave=null;}byId('tpPick').hidden=true;choosing=false;}
 function finishStart(student,where,outside,code){
@@ -689,7 +702,7 @@ function toggleTimer(){
  save();renderTimer();
 }
 function openTimerDialog(){
- const sec=timerValue();byId('tpTimerMinutes').value=Math.floor(sec/60);byId('tpTimerSeconds').value=sec%60;
+ const sec=timerValue();byId('tpTimerMinutes').value=Math.floor(sec/60);byId('tpTimerSeconds').value=sec%60;timerDigits='';byId('tpTimerRecent').innerHTML=(state.timer.recent||[]).map(sec=>'<button class="tp-smallbtn" data-tp-action="timerRecent" data-sec="'+sec+'">'+fmt(sec)+'</button>').join('');
  byId('tpTimerDialog').hidden=false;
 }
 function timerFromDialog(start){setTimer(clamp(val('tpTimerMinutes'),0,999)*60+clamp(val('tpTimerSeconds'),0,59),start);byId('tpTimerDialog').hidden=true;}
@@ -722,7 +735,7 @@ function onClick(ev){
  if(act==='exportTrips')return exportTrips();if(act==='toggleFullscreen'){if(document.fullscreenElement)document.exitFullscreen?.();else byId('glassRoot').requestFullscreen?.();return;}if(act==='saveOverride'){const d=val('tpOverrideDate'),o=val('tpOverrideType');if(!/^\d{4}-\d\d-\d\d$/.test(d))return;cfg.calendarOverrides=cfg.calendarOverrides||{};if(o)cfg.calendarOverrides[d]=o;else delete cfg.calendarOverrides[d];save();lastTickKey='';byId('tpSettingsNotice').textContent='Calendar override saved for '+d;tick();return;}
  if(act==='testTeacherSound')return playSound(val('tpTimerSound'));if(act==='soundPlay')return playSound(btn.dataset.soundId.startsWith('school:')?btn.dataset.soundId:'custom:'+btn.dataset.soundId);if(act==='soundRemove'){const id=btn.dataset.soundId;if(id.startsWith('school:')){cfg.schoolSounds=(cfg.schoolSounds||[]).filter(n=>'school:'+n!==id);save();refreshSoundOptions();return;}return removeSound(id).then(()=>{soundNames=soundNames.filter(x=>x.id!==id);refreshSoundOptions();});}if(act==='refreshSchoolSounds')return refreshSchoolSounds();if(act==='attentionSignal')return playSound(cfg.attentionSound);if(act==='syncTime')return syncTime();
  if(act==='shiftMinus'||act==='shiftPlus'){cfg.shiftSec=clamp(Number(cfg.shiftSec)+(act==='shiftPlus'?1:-1),-600,600);save();tick();return;}
- if(act==='newPass')return openPick();
+ if(act==='newPass')return openPick();if(act==='studentLetter'){pickerLetter=btn.dataset.letter||'';byId('tpStudentSearch').value='';renderStudentChoices();return;}
  if(act==='closePick')return closePick();
  if(act==='confirmPass')return confirmPass();
  if(act==='returnPass')return completePass(btn.dataset.passId,'Returned');
@@ -733,7 +746,7 @@ function onClick(ev){
  if(act==='timerPreset')return setTimer(Number(btn.dataset.min)*60,false);
  if(act==='timerEdit')return openTimerDialog();
  if(act==='timerDialogClose'){byId('tpTimerDialog').hidden=true;return;}
- if(act==='timerAdjust'){const s=clamp(val('tpTimerMinutes'),0,999)*60+clamp(val('tpTimerSeconds'),0,59)+Number(btn.dataset.sec);byId('tpTimerMinutes').value=Math.floor(Math.max(0,s)/60);byId('tpTimerSeconds').value=Math.max(0,s)%60;return;}
+ if(act==='timerKey'){const digit=btn.dataset.key;if(digit==='⌫')timerDigits=timerDigits.slice(0,-1);else timerDigits=(timerDigits+digit).slice(-4);const padded=timerDigits.padStart(4,'0'),sec=Number(padded.slice(0,2))*60+Number(padded.slice(2));byId('tpTimerMinutes').value=Math.floor(sec/60);byId('tpTimerSeconds').value=sec%60;return;}if(act==='timerRecent'){const n=Number(btn.dataset.sec);byId('tpTimerMinutes').value=Math.floor(n/60);byId('tpTimerSeconds').value=n%60;timerDigits='';return;}if(act==='timerAdjust'){timerDigits='';const s=clamp(val('tpTimerMinutes'),0,999)*60+clamp(val('tpTimerSeconds'),0,59)+Number(btn.dataset.sec);byId('tpTimerMinutes').value=Math.floor(Math.max(0,s)/60);byId('tpTimerSeconds').value=Math.max(0,s)%60;return;}
  if(act==='timerSet'||act==='timerSetStart')return timerFromDialog(act==='timerSetStart');
 }
 attach();

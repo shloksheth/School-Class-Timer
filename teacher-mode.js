@@ -10,7 +10,7 @@ const CFG_KEY = 'oss-teacher-config-v1';
 const STATE_KEY = 'oss-teacher-state-v1';
 const SCHOOL_URL = 'https://script.google.com/macros/s/AKfycbyK0y5PNq5rJfvAAVGyctWzQhSYwjvACE3muXEAojeoQZYqvBlAdE_XXXrCC3i77kO5HA/exec';
 const defaults = {
-  teacherName:'',room:'',url:SCHOOL_URL,code:'',teacher:null,rosters:{},groups:{},sections:{},gradeBand:'1011',calendarOverrides:{},hour24:false,countdownPassed:false,fullScreen:false,demoSpeed:1,timeServer:'',timeOffsetMs:0,schoolSounds:[],
+  teacherName:'',room:'',url:SCHOOL_URL,code:'',teacher:null,rosters:{},groups:{},sections:{},gradeBand:'1011',calendarOverrides:{},hour24:false,countdownPassed:false,fullScreen:false,demoSpeed:1,demoAnchorMs:0,timeServer:'',timeOffsetMs:0,schoolSounds:[],
   startClose:10,endClose:10,useRule:true,allowOverride:false,slots:2,autoLeave:5,
   destinations:'Restroom:8\nLocker:3\nWater:3\nOffice:8\nNurse:8\nOther:8',
   timerEnabled:true,timerWarn:60,timerSound:'bell',timerWarnSound:'beep',timerVolume:35,
@@ -43,7 +43,7 @@ const timeLabel=n=>new Date(n).toLocaleTimeString([],{hour:'numeric',minute:'2-d
 const secDay=d=>d.getHours()*3600+d.getMinutes()*60+d.getSeconds();
 const mins=s=>{const p=String(s||'0:00').split(':').map(Number);return p[0]*60+p[1];};
 const save=()=>{localStorage.setItem(CFG_KEY,JSON.stringify(cfg));localStorage.setItem(STATE_KEY,JSON.stringify(state));};
-const nowDate=()=>new Date(Date.now()+Number(cfg.shiftSec||0)*1000+Number(cfg.driftDaily||0)*((Date.now()-(cfg.driftAt||Date.now()))/86400000)*1000+Number(cfg.timeOffsetMs||0)+(cfg.demo?Math.max(0,Date.now()-(cfg.demoStarted||Date.now()))*(Number(cfg.demoSpeed||1)-1):0));
+const nowDate=()=>new Date((cfg.demo&&cfg.demoAnchorMs?cfg.demoAnchorMs+Math.max(0,Date.now()-(cfg.demoStarted||Date.now()))*Number(cfg.demoSpeed||1):Date.now())+Number(cfg.shiftSec||0)*1000+Number(cfg.driftDaily||0)*((Date.now()-(cfg.driftAt||Date.now()))/86400000)*1000+(cfg.demo?0:Number(cfg.timeOffsetMs||0)));
 let soundNames=[],soundDb=null;const soundBlobCache=new Map();
 const iso=d=>[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');
 const sectionCode=(row,rotation)=>{
@@ -101,7 +101,7 @@ function panelHTML(){
   return '<main class="content-shell" id="teacherDashboard" hidden>'+
     '<div class="tp-toolbar"><div><div class="tp-kicker">Teacher mode</div><h1 id="tpRoomTitle">Classroom dashboard</h1><p id="tpSubTitle">Hall passes, lesson timing and classroom tools</p></div>'+
     '<div class="tp-actions"><button class="liquid-btn" data-tp-action="attentionSignal">Attention</button><button class="liquid-btn" data-tp-action="changeMode">Change mode</button><button class="liquid-btn primary-action" data-tp-action="openTeacherSettings">Teacher settings</button></div></div>'+
-    '<div id="tpAlertsBanner" class="tp-alerts-banner" hidden></div><div class="tp-grid"><div>'+
+    '<div id="tpAlertsBanner" class="tp-alerts-banner" hidden></div>'+'<section id="tpDemoPanel" class="tp-panel" hidden style="margin-bottom:15px"><div class="tp-panel-head"><h2>Demo controls</h2><span class="tp-mini" id="tpDemoTime"></span></div><div class="tp-row"><button class="tp-smallbtn" data-tp-action="demoJumpClosed">Passes closed</button><button class="tp-smallbtn" data-tp-action="demoJumpOpen">Passes open</button><button class="tp-smallbtn" data-tp-action="demoJumpLate">End of class</button><button class="tp-smallbtn" data-tp-action="demoJumpNext">Next school day</button><button class="tp-smallbtn" data-tp-action="demoSpeedToggle">Change speed</button></div><p class="tp-muted">Demo only. Uses sample students. Nothing is saved to the school log.</p></section>'+'<div class="tp-grid"><div>'+
       '<section class="tp-panel"><div class="tp-panel-head"><span class="tp-status" id="tpStatus" data-status="between">School schedule</span><span class="tp-mini" id="tpDate"></span></div>'+
         '<div class="tp-headline" id="tpPeriod">Loading...</div><div class="tp-muted" id="tpPeriodMeta"></div>'+
         '<div class="tp-inline"><div><div class="tp-clock" id="tpCountdown">--:--</div><div class="tp-subclock" id="tpCountdownLabel">Until next transition</div></div><div class="tp-row"><button class="tp-smallbtn" data-tp-action="shiftMinus">-1s</button><button class="tp-smallbtn" data-tp-action="shiftPlus">+1s</button><button class="tp-smallbtn" data-tp-action="toggleFullscreen">Full screen</button></div></div>'+
@@ -271,7 +271,7 @@ function saveTeacherSettings(){
   cfg.agendaEnabled=checked('tpAgendaEnabled');cfg.agendaDaily=checked('tpAgendaDaily');cfg.agendaLead=clamp(val('tpAgendaLead'),0,30);
   cfg.weatherEnabled=checked('tpWeatherEnabled');cfg.cardsEnabled=checked('tpCardsEnabled');cfg.messagesEnabled=checked('tpMessagesEnabled');cfg.alertsEnabled=checked('tpAlertsEnabled');
   cfg.shiftSec=clamp(val('tpShift'),-600,600);cfg.driftDaily=clamp(val('tpDrift'),-10,10);
-  cfg.demo=checked('tpDemo');cfg.testMode=checked('tpTestMode');if(cfg.demo&&!cfg.demoStarted)cfg.demoStarted=Date.now();if(!cfg.demo)cfg.demoStarted=0;
+  const demoWasEnabled=!!cfg.demo;cfg.demo=checked('tpDemo');cfg.testMode=checked('tpTestMode');if(cfg.demo&&!demoWasEnabled)demoJump('open',true);if(!cfg.demo){cfg.demoStarted=0;cfg.demoAnchorMs=0;}
   cfg.url=val('tpUrlInput').trim()||SCHOOL_URL;cfg.timeServer=val('tpTimeServer').trim();
   if(cfg.url&&!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec(?:\?.*)?$/.test(cfg.url)){byId('tpSettingsNotice').textContent='The script URL must be a Google Apps Script /exec HTTPS address.';return;}
   const code=val('tpCodeInput').trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
@@ -614,9 +614,28 @@ function playSound(which){
     osc.connect(gain);gain.connect(ctx.destination);osc.start();osc.stop(ctx.currentTime+.3);
   }catch(_){}
 }
+function demoJump(kind,quiet=false){
+ const calendar=window.CALENDAR||{};
+ const today=iso(nowDate());
+ const available=Object.entries(calendar).filter(([,v])=>!!v).map(([date])=>date).sort();
+ const day=kind==='next'?available.find(d=>d>today):(calendar[today]?today:available.find(d=>d>=today))||available[0];
+ if(!day)return;
+ const [y,m,d]=day.split('-').map(Number),base=new Date(y,m-1,d);
+ const info=calendar[day],band=cfg.gradeBand==='912'?'912':'1011';
+ const rows=window.SCHEDULE_TABLES?.[band]?.[info?.includes('Wednesday')?'wednesday':'regular']?.rows||[];
+ const first=rows.find(r=>r.type==='class'&&/^Period/.test(r.label));
+ if(!first)return;
+ let seconds=mins(first.start)*60;
+ if(kind==='open'||kind==='next')seconds+=cfg.useRule?cfg.startClose*60+30:120;
+ if(kind==='late')seconds=mins(first.end)*60-(cfg.useRule?cfg.endClose*60:60)+30;
+ if(kind==='closed')seconds+=30;
+ cfg.demoAnchorMs=base.getTime()+seconds*1000;cfg.demoStarted=Date.now();
+ save();lastTickKey='';lastCardId='';
+ if(!quiet)tick();
+}
 function tick(){
  if(role!=='teacher')return;
- const sc=schedule(),win=windowState(sc);
+ const sc=schedule(),win=windowState(sc);byId('tpDemoPanel').hidden=!cfg.demo;byId('tpDemoTime').textContent=cfg.demo?sc.now.toLocaleTimeString([],{hour:'numeric',minute:'2-digit',second:'2-digit'})+' · '+Number(cfg.demoSpeed||1)+'× speed':'';
  const title=cfg.teacherName||(cfg.teacher?.display)||'Classroom dashboard';
  byId('tpRoomTitle').textContent=title;
  byId('tpSubTitle').textContent=(cfg.room?'Room '+cfg.room+' · ':'')+'Classroom tools & hall passes';
@@ -776,7 +795,7 @@ function onClick(ev){
  if(act==='resetDrift'){cfg.shiftSec=0;cfg.driftDaily=0;cfg.driftAt=Date.now();byId('tpShift').value=0;byId('tpDrift').value=0;save();return;}
  if(act==='flushQueue')return flushQueue();
  if(act==='exportTrips')return exportTrips();if(act==='toggleFullscreen'){if(document.fullscreenElement)document.exitFullscreen?.();else byId('glassRoot').requestFullscreen?.();return;}if(act==='saveOverride'){const d=val('tpOverrideDate'),o=val('tpOverrideType');if(!/^\d{4}-\d\d-\d\d$/.test(d))return;cfg.calendarOverrides=cfg.calendarOverrides||{};if(o)cfg.calendarOverrides[d]=o;else delete cfg.calendarOverrides[d];save();lastTickKey='';byId('tpSettingsNotice').textContent='Calendar override saved for '+d;tick();return;}
- if(act==='testTeacherSound')return playSound(val('tpTimerSound'));if(act==='soundPlay')return playSound(btn.dataset.soundId.startsWith('school:')?btn.dataset.soundId:'custom:'+btn.dataset.soundId);if(act==='soundRemove'){const id=btn.dataset.soundId;if(id.startsWith('school:')){cfg.schoolSounds=(cfg.schoolSounds||[]).filter(n=>'school:'+n!==id);save();refreshSoundOptions();return;}return removeSound(id).then(()=>{soundNames=soundNames.filter(x=>x.id!==id);refreshSoundOptions();});}if(act==='refreshSchoolSounds')return refreshSchoolSounds();if(act==='attentionSignal')return playSound(cfg.attentionSound);if(act==='revealQuestion'){const target=byId('tpQuestionAnswer');if(target)target.hidden=!target.hidden;return;}if(act==='syncTime')return syncTime();
+ if(act==='testTeacherSound')return playSound(val('tpTimerSound'));if(act==='soundPlay')return playSound(btn.dataset.soundId.startsWith('school:')?btn.dataset.soundId:'custom:'+btn.dataset.soundId);if(act==='soundRemove'){const id=btn.dataset.soundId;if(id.startsWith('school:')){cfg.schoolSounds=(cfg.schoolSounds||[]).filter(n=>'school:'+n!==id);save();refreshSoundOptions();return;}return removeSound(id).then(()=>{soundNames=soundNames.filter(x=>x.id!==id);refreshSoundOptions();});}if(act==='refreshSchoolSounds')return refreshSchoolSounds();if(act==='attentionSignal')return playSound(cfg.attentionSound);if(act==='demoJumpClosed')return demoJump('closed');if(act==='demoJumpOpen')return demoJump('open');if(act==='demoJumpLate')return demoJump('late');if(act==='demoJumpNext')return demoJump('next');if(act==='demoSpeedToggle'){if(!cfg.demo)return;const at=nowDate().getTime();cfg.demoSpeed=cfg.demoSpeed===1?10:cfg.demoSpeed===10?30:cfg.demoSpeed===30?60:1;cfg.demoAnchorMs=at-Number(cfg.shiftSec||0)*1000;cfg.demoStarted=Date.now();save();tick();return;}if(act==='revealQuestion'){const target=byId('tpQuestionAnswer');if(target)target.hidden=!target.hidden;return;}if(act==='syncTime')return syncTime();
  if(act==='shiftMinus'||act==='shiftPlus'){cfg.shiftSec=clamp(Number(cfg.shiftSec)+(act==='shiftPlus'?1:-1),-600,600);save();tick();return;}
  if(act==='newPass')return openPick();if(act==='studentLetter'){pickerLetter=btn.dataset.letter||'';byId('tpStudentSearch').value='';renderStudentChoices();return;}
  if(act==='closePick')return closePick();

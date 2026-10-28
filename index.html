@@ -258,6 +258,7 @@ html[data-theme="dark"] .unsaved-dialog,html[data-theme="light"][data-scene="for
 @media(max-width:470px){.topbar{gap:8px}.top-actions{gap:4px}.top-actions .theme-btn,.top-actions .bell-btn{width:40px}.top-select{min-width:84px;max-width:84px;padding-left:8px;padding-right:25px}.site-title{max-width:106px;font-size:14px}.summary-grid{grid-template-columns:1fr}.summary-card:last-child{grid-column:auto}.page-meta{flex-direction:column;align-items:flex-end;gap:1px}.scene-options{grid-template-columns:1fr 1fr}.form-actions{align-items:stretch;flex-direction:column-reverse}.form-actions .liquid-btn{width:100%}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation:none!important;transition:none!important}.liquid-btn:hover,.summary-card:hover,.scene-option:hover,.glass-stage{transform:none!important}}
 </style>
+<link rel="stylesheet" href="teacher-mode.css">
 </head>
 <body>
 <div class="scene-media" aria-hidden="true">
@@ -834,5 +835,6 @@ initLenis();update();setInterval(update,1000);
   }catch(error){console.warn('Liquid glass shader unavailable; using CSS glass fallback.',error)}
 })();
 </script>
+<script src="teacher-mode.js"></script>
 </body>
 </html>

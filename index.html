@@ -259,6 +259,8 @@ html[data-theme="dark"] .unsaved-dialog,html[data-theme="light"][data-scene="for
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation:none!important;transition:none!important}.liquid-btn:hover,.summary-card:hover,.scene-option:hover,.glass-stage{transform:none!important}}
 </style>
 <link rel="stylesheet" href="teacher-mode.css">
+<link rel="manifest" href="teacher-manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="teacher-app-icon.svg">
 </head>
 <body>
 <div class="scene-media" aria-hidden="true">
@@ -837,5 +839,6 @@ initLenis();update();setInterval(update,1000);
 </script>
 <script src="teacher-calendar.js"></script>
 <script src="teacher-mode.js"></script>
+<script>if("serviceWorker" in navigator && location.protocol.startsWith("http"))navigator.serviceWorker.register("./teacher-sw.js").catch(console.warn);</script>
 </body>
 </html>

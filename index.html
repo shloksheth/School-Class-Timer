@@ -721,7 +721,7 @@ $('grade').addEventListener('change',e=>{selectedGrade=e.target.value;localStora
 $('scheduleButton').addEventListener('click',()=>{setActiveNav('schedule');scrollToId('#schedule')});
 document.querySelectorAll('.tab').forEach(tab=>tab.addEventListener('click',()=>{selectedView=tab.dataset.view;renderSchedule()}));
 document.querySelectorAll('.nav-link[href]').forEach(link=>link.addEventListener('click',e=>{e.preventDefault();const key=link.dataset.nav;setActiveNav(key);history.replaceState(null,'',link.getAttribute('href'));scrollToId(link.getAttribute('href'))}));
-$('settingsNav').addEventListener('click',()=>openSettings(activeProfileId));
+$('settingsNav').addEventListener('click',()=>{if(document.documentElement.dataset.appRole==='teacher')document.querySelector('[data-tp-action="openTeacherSettings"]')?.click();else openSettings(activeProfileId)});
 $('profileButton').addEventListener('click',()=>openSettings(activeProfileId));
 $('closeSettings').addEventListener('click',requestCloseSettings);
 $('settingsBackdrop').addEventListener('click',e=>{if(e.target===$('settingsBackdrop'))requestCloseSettings()});
@@ -835,6 +835,7 @@ initLenis();update();setInterval(update,1000);
   }catch(error){console.warn('Liquid glass shader unavailable; using CSS glass fallback.',error)}
 })();
 </script>
+<script src="teacher-calendar.js"></script>
 <script src="teacher-mode.js"></script>
 </body>
 </html>

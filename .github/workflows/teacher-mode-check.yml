@@ -23,5 +23,5 @@ jobs:
         with:
           node-version: '22'
       - run: npm install --no-save playwright@1.58.2
-      - run: npx playwright install --with-deps chromium
+      - run: google-chrome --version
       - run: node tests/teacher-browser.test.cjs
